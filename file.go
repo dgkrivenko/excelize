@@ -131,10 +131,13 @@ func (f *File) WriteTo(w io.Writer, opts ...Options) (int64, error) {
 		}
 		return buf.WriteTo(w)
 	}
-	if err := f.writeDirectToWriter(w); err != nil {
+
+	n, err := f.writeDirectToWriter(w)
+	if err != nil {
 		return 0, err
 	}
-	return 0, nil
+
+	return n, nil
 }
 
 // WriteToBuffer provides a function to get bytes.Buffer from the saved file,
@@ -143,7 +146,7 @@ func (f *File) WriteToBuffer() (*bytes.Buffer, error) {
 	buf := new(bytes.Buffer)
 	zw := zip.NewWriter(buf)
 
-	if err := f.writeToZip(zw); err != nil {
+	if _, err := f.writeToZip(zw); err != nil {
 		return buf, zw.Close()
 	}
 
@@ -163,17 +166,20 @@ func (f *File) WriteToBuffer() (*bytes.Buffer, error) {
 }
 
 // writeDirectToWriter provides a function to write to io.Writer.
-func (f *File) writeDirectToWriter(w io.Writer) error {
+func (f *File) writeDirectToWriter(w io.Writer) (int64, error) {
 	zw := zip.NewWriter(w)
-	if err := f.writeToZip(zw); err != nil {
+
+	n, err := f.writeToZip(zw)
+	if err != nil {
 		_ = zw.Close()
-		return err
+		return 0, err
 	}
-	return zw.Close()
+
+	return n, zw.Close()
 }
 
 // writeToZip provides a function to write to zip.Writer
-func (f *File) writeToZip(zw *zip.Writer) error {
+func (f *File) writeToZip(zw *zip.Writer) (int64, error) {
 	f.calcChainWriter()
 	f.commentsWriter()
 	f.contentTypesWriter()
@@ -187,24 +193,29 @@ func (f *File) writeToZip(zw *zip.Writer) error {
 	f.styleSheetWriter()
 	f.themeWriter()
 
+	var written int64
+
 	for path, stream := range f.streams {
 		fi, err := zw.Create(path)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		var from io.Reader
 		from, err = stream.rawData.Reader()
 		if err != nil {
 			_ = stream.rawData.Close()
-			return err
+			return 0, err
 		}
-		_, err = io.Copy(fi, from)
+		n, err := io.Copy(fi, from)
 		if err != nil {
-			return err
+			return 0, err
 		}
+		written += n
 	}
 	var err error
 	f.Pkg.Range(func(path, content interface{}) bool {
+		var n int
+
 		if err != nil {
 			return false
 		}
@@ -216,10 +227,15 @@ func (f *File) writeToZip(zw *zip.Writer) error {
 		if err != nil {
 			return false
 		}
-		_, err = fi.Write(content.([]byte))
+		n, err = fi.Write(content.([]byte))
+		if err != nil {
+			return false
+		}
+		written += int64(n)
 		return true
 	})
 	f.tempFiles.Range(func(path, content interface{}) bool {
+		var n int
 		if _, ok := f.Pkg.Load(path); ok {
 			return true
 		}
@@ -228,8 +244,12 @@ func (f *File) writeToZip(zw *zip.Writer) error {
 		if err != nil {
 			return false
 		}
-		_, err = fi.Write(f.readBytes(path.(string)))
+		n, err = fi.Write(f.readBytes(path.(string)))
+		if err != nil {
+			return false
+		}
+		written += int64(n)
 		return true
 	})
-	return err
+	return written, err
 }

@@ -29,8 +29,7 @@ func TestMergeCell(t *testing.T) {
 	value, err := f.GetCellValue("Sheet1", "H11")
 	assert.Equal(t, "100", value)
 	assert.NoError(t, err)
-	// Merged cell ref is single coordinate
-	value, err = f.GetCellValue("Sheet2", "A6")
+	value, err = f.GetCellValue("Sheet2", "A6") // Merged cell ref is single coordinate.
 	assert.Equal(t, "", value)
 	assert.NoError(t, err)
 	value, err = f.GetCellFormula("Sheet1", "G12")
@@ -65,10 +64,9 @@ func TestMergeCell(t *testing.T) {
 	assert.NoError(t, f.MergeCell("Sheet3", "M8", "Q13"))
 	assert.NoError(t, f.MergeCell("Sheet3", "N10", "O11"))
 
-	// Test merge cells on not exists worksheet
-	assert.EqualError(t, f.MergeCell("SheetN", "N10", "O11"), "sheet SheetN does not exist")
-	// Test merged cells with invalid sheet name
-	assert.EqualError(t, f.MergeCell("Sheet:1", "N10", "O11"), ErrSheetNameInvalid.Error())
+	// Test get merged cells on not exists worksheet.
+	assert.EqualError(t, f.MergeCell("SheetN", "N10", "O11"), "sheet SheetN is not exist")
+
 	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestMergeCell.xlsx")))
 	assert.NoError(t, f.Close())
 
@@ -139,12 +137,10 @@ func TestGetMergeCells(t *testing.T) {
 		assert.Equal(t, wants[i].start, m.GetStartAxis())
 		assert.Equal(t, wants[i].end, m.GetEndAxis())
 	}
-	// Test get merged cells with invalid sheet name
-	_, err = f.GetMergeCells("Sheet:1")
-	assert.EqualError(t, err, ErrSheetNameInvalid.Error())
-	// Test get merged cells on not exists worksheet
+
+	// Test get merged cells on not exists worksheet.
 	_, err = f.GetMergeCells("SheetN")
-	assert.EqualError(t, err, "sheet SheetN does not exist")
+	assert.EqualError(t, err, "sheet SheetN is not exist")
 	assert.NoError(t, f.Close())
 }
 
@@ -162,7 +158,7 @@ func TestUnmergeCell(t *testing.T) {
 
 	assert.EqualError(t, f.UnmergeCell("Sheet1", "A", "A"), newCellNameToCoordinatesError("A", newInvalidCellNameError("A")).Error())
 
-	// Test unmerge the merged cells that contains A1
+	// unmerge the mergecell that contains A1
 	assert.NoError(t, f.UnmergeCell(sheet1, "A1", "A1"))
 	if len(sheet.MergeCells.Cells) != mergeCellNum-1 {
 		t.FailNow()
@@ -173,11 +169,8 @@ func TestUnmergeCell(t *testing.T) {
 
 	f = NewFile()
 	assert.NoError(t, f.MergeCell("Sheet1", "A2", "B3"))
-	// Test unmerged range reference on not exists worksheet
-	assert.EqualError(t, f.UnmergeCell("SheetN", "A1", "A1"), "sheet SheetN does not exist")
-
-	// Test unmerge the merged cells with invalid sheet name
-	assert.EqualError(t, f.UnmergeCell("Sheet:1", "A1", "A1"), ErrSheetNameInvalid.Error())
+	// Test unmerged area on not exists worksheet.
+	assert.EqualError(t, f.UnmergeCell("SheetN", "A1", "A1"), "sheet SheetN is not exist")
 
 	ws, ok := f.Sheet.Load("xl/worksheets/sheet1.xml")
 	assert.True(t, ok)
@@ -192,7 +185,7 @@ func TestUnmergeCell(t *testing.T) {
 	ws, ok = f.Sheet.Load("xl/worksheets/sheet1.xml")
 	assert.True(t, ok)
 	ws.(*xlsxWorksheet).MergeCells = &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: "A1"}}}
-	assert.NoError(t, f.UnmergeCell("Sheet1", "A2", "B3"))
+	assert.EqualError(t, f.UnmergeCell("Sheet1", "A2", "B3"), ErrParameterInvalid.Error())
 
 	ws, ok = f.Sheet.Load("xl/worksheets/sheet1.xml")
 	assert.True(t, ok)
@@ -201,12 +194,6 @@ func TestUnmergeCell(t *testing.T) {
 }
 
 func TestFlatMergedCells(t *testing.T) {
-	ws := &xlsxWorksheet{MergeCells: &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: ""}}}}
-	assert.EqualError(t, flatMergedCells(ws, [][]*xlsxMergeCell{}), "cannot convert cell \"\" to coordinates: invalid cell name \"\"")
-}
-
-func TestMergeCellsParser(t *testing.T) {
-	f := NewFile()
-	_, err := f.mergeCellsParser(&xlsxWorksheet{MergeCells: &xlsxMergeCells{Cells: []*xlsxMergeCell{nil}}}, "A1")
-	assert.NoError(t, err)
+	ws := &xlsxWorksheet{MergeCells: &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: "A1"}}}}
+	assert.EqualError(t, flatMergedCells(ws, [][]*xlsxMergeCell{}), ErrParameterInvalid.Error())
 }

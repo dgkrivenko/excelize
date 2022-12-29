@@ -17,6 +17,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"reflect"
 	"strconv"
@@ -757,7 +758,7 @@ var builtInNumFmtFunc = map[int]func(v, format string, date1904 bool) string{
 	0:  format,
 	1:  formatToInt,
 	2:  formatToFloat,
-	3:  formatToIntSeparator,
+	3:  formatToInt,
 	4:  formatToFloat,
 	9:  formatToC,
 	10: formatToD,
@@ -843,163 +844,60 @@ var criteriaType = map[string]string{
 	"continue month":           "continueMonth",
 }
 
-// operatorType defined the list of valid operator types.
-var operatorType = map[string]string{
-	"lastMonth":          "last month",
-	"between":            "between",
-	"notEqual":           "not equal to",
-	"greaterThan":        "greater than",
-	"lessThanOrEqual":    "less than or equal to",
-	"today":              "today",
-	"equal":              "equal to",
-	"notContains":        "not containing",
-	"thisWeek":           "this week",
-	"endsWith":           "ends with",
-	"yesterday":          "yesterday",
-	"lessThan":           "less than",
-	"beginsWith":         "begins with",
-	"last7Days":          "last 7 days",
-	"thisMonth":          "this month",
-	"containsText":       "containing",
-	"lastWeek":           "last week",
-	"continueWeek":       "continue week",
-	"continueMonth":      "continue month",
-	"notBetween":         "not between",
-	"greaterThanOrEqual": "greater than or equal to",
-}
-
-// printCommaSep format number with thousands separator.
-func printCommaSep(text string) string {
-	var (
-		target strings.Builder
-		subStr = strings.Split(text, ".")
-		length = len(subStr[0])
-	)
-	for i := 0; i < length; i++ {
-		if i > 0 && (length-i)%3 == 0 {
-			target.WriteString(",")
-		}
-		target.WriteString(string(text[i]))
-	}
-	if len(subStr) == 2 {
-		target.WriteString(".")
-		target.WriteString(subStr[1])
-	}
-	return target.String()
-}
-
 // formatToInt provides a function to convert original string to integer
 // format as string type by given built-in number formats code and cell
 // string.
 func formatToInt(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
 	}
-	return strconv.FormatFloat(math.Round(f), 'f', -1, 64)
+	return fmt.Sprintf("%d", int64(f))
 }
 
 // formatToFloat provides a function to convert original string to float
 // format as string type by given built-in number formats code and cell
 // string.
 func formatToFloat(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
-	}
-	source := strconv.FormatFloat(f, 'f', -1, 64)
-	if !strings.Contains(source, ".") {
-		return source + ".00"
 	}
 	return fmt.Sprintf("%.2f", f)
-}
-
-// formatToIntSeparator provides a function to convert original string to
-// integer format as string type by given built-in number formats code and cell
-// string.
-func formatToIntSeparator(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return v
-	}
-	return printCommaSep(strconv.FormatFloat(math.Round(f), 'f', -1, 64))
 }
 
 // formatToA provides a function to convert original string to special format
 // as string type by given built-in number formats code and cell string.
 func formatToA(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
 	}
-	var target strings.Builder
 	if f < 0 {
-		target.WriteString("(")
+		return fmt.Sprintf("(%d)", int(math.Abs(f)))
 	}
-	target.WriteString(printCommaSep(strconv.FormatFloat(math.Abs(math.Round(f)), 'f', -1, 64)))
-	if f < 0 {
-		target.WriteString(")")
-	} else {
-		target.WriteString(" ")
-	}
-	return target.String()
+	return fmt.Sprintf("%d", int(f))
 }
 
 // formatToB provides a function to convert original string to special format
 // as string type by given built-in number formats code and cell string.
 func formatToB(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
 	}
-	var target strings.Builder
 	if f < 0 {
-		target.WriteString("(")
+		return fmt.Sprintf("(%.2f)", f)
 	}
-	source := strconv.FormatFloat(math.Abs(f), 'f', -1, 64)
-	var text string
-	if !strings.Contains(source, ".") {
-		text = printCommaSep(source + ".00")
-	} else {
-		text = printCommaSep(fmt.Sprintf("%.2f", math.Abs(f)))
-	}
-	target.WriteString(text)
-	if f < 0 {
-		target.WriteString(")")
-	} else {
-		target.WriteString(" ")
-	}
-	return target.String()
+	return fmt.Sprintf("%.2f", f)
 }
 
 // formatToC provides a function to convert original string to special format
 // as string type by given built-in number formats code and cell string.
 func formatToC(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
-	}
-	source := strconv.FormatFloat(f, 'f', -1, 64)
-	if !strings.Contains(source, ".") {
-		return source + "00%"
 	}
 	return fmt.Sprintf("%.f%%", f*100)
 }
@@ -1007,16 +905,9 @@ func formatToC(v, format string, date1904 bool) string {
 // formatToD provides a function to convert original string to special format
 // as string type by given built-in number formats code and cell string.
 func formatToD(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
-	}
-	source := strconv.FormatFloat(f, 'f', -1, 64)
-	if !strings.Contains(source, ".") {
-		return source + "00.00%"
 	}
 	return fmt.Sprintf("%.2f%%", f*100)
 }
@@ -1024,9 +915,6 @@ func formatToD(v, format string, date1904 bool) string {
 // formatToE provides a function to convert original string to special format
 // as string type by given built-in number formats code and cell string.
 func formatToE(v, format string, date1904 bool) string {
-	if strings.Contains(v, "_") {
-		return v
-	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return v
@@ -1036,15 +924,15 @@ func formatToE(v, format string, date1904 bool) string {
 
 // stylesReader provides a function to get the pointer to the structure after
 // deserialization of xl/styles.xml.
-func (f *File) stylesReader() (*xlsxStyleSheet, error) {
+func (f *File) stylesReader() *xlsxStyleSheet {
 	if f.Styles == nil {
 		f.Styles = new(xlsxStyleSheet)
 		if err := f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(defaultXMLPathStyles)))).
 			Decode(f.Styles); err != nil && err != io.EOF {
-			return f.Styles, err
+			log.Printf("xml decode error: %s", err)
 		}
 	}
-	return f.Styles, nil
+	return f.Styles
 }
 
 // styleSheetWriter provides a function to save xl/styles.xml after serialize
@@ -1053,15 +941,6 @@ func (f *File) styleSheetWriter() {
 	if f.Styles != nil {
 		output, _ := xml.Marshal(f.Styles)
 		f.saveFileList(defaultXMLPathStyles, f.replaceNameSpaceBytes(defaultXMLPathStyles, output))
-	}
-}
-
-// themeWriter provides a function to save xl/theme/theme1.xml after serialize
-// structure.
-func (f *File) themeWriter() {
-	if f.Theme != nil {
-		output, _ := xml.Marshal(f.Theme)
-		f.saveFileList(defaultXMLPathTheme, f.replaceNameSpaceBytes(defaultXMLPathTheme, output))
 	}
 }
 
@@ -1101,25 +980,10 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 	return &fs, err
 }
 
-// NewStyle provides a function to create the style for cells by given structure
-// pointer or JSON. This function is concurrency safe. Note that
-// the 'Font.Color' field uses an RGB color represented in 'RRGGBB' hexadecimal
-// notation.
+// NewStyle provides a function to create the style for cells by given JSON or
+// structure pointer. Note that the color field uses RGB color code.
 //
-// The following table shows the border types used in 'Border.Type' supported by
-// excelize:
-//
-//	 Type         | Description
-//	--------------+------------------
-//	 left         | Left border
-//	 top          | Top border
-//	 right        | Right border
-//	 bottom       | Bottom border
-//	 diagonalDown | Diagonal down border
-//	 diagonalUp   | Diagonal up border
-//
-// The following table shows the border styles used in 'Border.Style' supported
-// by excelize index number:
+// The following shows the border styles sorted by excelize index number:
 //
 //	 Index | Name          | Weight | Style
 //	-------+---------------+--------+-------------
@@ -1138,8 +1002,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 12    | Dash Dot Dot  | 2      | - . . - . .
 //	 13    | SlantDash Dot | 2      | / - . / - .
 //
-// The following table shows the border styles used in 'Border.Style' in the
-// order shown in the Excel dialog:
+// The following shows the borders in the order shown in the Excel dialog:
 //
 //	 Index | Style       | Index | Style
 //	-------+-------------+-------+-------------
@@ -1151,8 +1014,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 3     | - - - - - - | 5     | -----------
 //	 1     | ----------- | 6     | ===========
 //
-// The following table shows the shading styles used in 'Fill.Shading' supported
-// by excelize index number:
+// The following shows the shading styles sorted by excelize index number:
 //
 //	 Index | Style           | Index | Style
 //	-------+-----------------+-------+-----------------
@@ -1160,8 +1022,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 1     | Vertical        | 4     | From corner
 //	 2     | Diagonal Up     | 5     | From center
 //
-// The following table shows the pattern styles used in 'Fill.Pattern' supported
-// by excelize index number:
+// The following shows the patterns styles sorted by excelize index number:
 //
 //	 Index | Style           | Index | Style
 //	-------+-----------------+-------+-----------------
@@ -1176,8 +1037,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 8     | darkUp          | 18    | gray0625
 //	 9     | darkGrid        |       |
 //
-// The following table shows the type of cells' horizontal alignment used
-// in 'Alignment.Horizontal':
+// The following the type of horizontal alignment in cells:
 //
 //	 Style
 //	------------------
@@ -1189,8 +1049,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 centerContinuous
 //	 distributed
 //
-// The following table shows the type of cells' vertical alignment used in
-// 'Alignment.Vertical':
+// The following the type of vertical alignment in cells:
 //
 //	 Style
 //	------------------
@@ -1199,8 +1058,7 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //	 justify
 //	 distributed
 //
-// The following table shows the type of font underline style used in
-// 'Font.Underline':
+// The following the type of font underline style:
 //
 //	 Style
 //	------------------
@@ -1984,12 +1842,9 @@ func parseFormatStyleSet(style interface{}) (*Style, error) {
 //
 // Cell Sheet1!A6 in the Excel Application: martes, 04 de Julio de 2017
 func (f *File) NewStyle(style interface{}) (int, error) {
-	var (
-		fs                                  *Style
-		font                                *xlsxFont
-		err                                 error
-		cellXfsID, fontID, borderID, fillID int
-	)
+	var fs *Style
+	var err error
+	var cellXfsID, fontID, borderID, fillID int
 	fs, err = parseFormatStyleSet(style)
 	if err != nil {
 		return cellXfsID, err
@@ -1997,25 +1852,21 @@ func (f *File) NewStyle(style interface{}) (int, error) {
 	if fs.DecimalPlaces == 0 {
 		fs.DecimalPlaces = 2
 	}
-	s, err := f.stylesReader()
-	if err != nil {
-		return cellXfsID, err
-	}
+	s := f.stylesReader()
 	s.Lock()
 	defer s.Unlock()
 	// check given style already exist.
-	if cellXfsID, err = f.getStyleID(s, fs); err != nil || cellXfsID != -1 {
+	if cellXfsID = f.getStyleID(s, fs); cellXfsID != -1 {
 		return cellXfsID, err
 	}
 
 	numFmtID := newNumFmt(s, fs)
 
 	if fs.Font != nil {
-		fontID, _ = f.getFontID(s, fs)
+		fontID = f.getFontID(s, fs)
 		if fontID == -1 {
 			s.Fonts.Count++
-			font, _ = f.newFont(fs)
-			s.Fonts.Font = append(s.Fonts.Font, font)
+			s.Fonts.Font = append(s.Fonts.Font, f.newFont(fs))
 			fontID = s.Fonts.Count - 1
 		}
 	}
@@ -2090,20 +1941,13 @@ var getXfIDFuncs = map[string]func(int, xlsxXf, *Style) bool{
 }
 
 // getStyleID provides a function to get styleID by given style. If given
-// style does not exist, will return -1.
-func (f *File) getStyleID(ss *xlsxStyleSheet, style *Style) (int, error) {
-	var (
-		err     error
-		fontID  int
-		styleID = -1
-	)
+// style is not exist, will return -1.
+func (f *File) getStyleID(ss *xlsxStyleSheet, style *Style) (styleID int) {
+	styleID = -1
 	if ss.CellXfs == nil {
-		return styleID, err
+		return
 	}
-	numFmtID, borderID, fillID := getNumFmtID(ss, style), getBorderID(ss, style), getFillID(ss, style)
-	if fontID, err = f.getFontID(ss, style); err != nil {
-		return styleID, err
-	}
+	numFmtID, borderID, fillID, fontID := getNumFmtID(ss, style), getBorderID(ss, style), getFillID(ss, style), f.getFontID(ss, style)
 	if style.CustomNumFmt != nil {
 		numFmtID = getCustomNumFmtID(ss, style)
 	}
@@ -2115,21 +1959,18 @@ func (f *File) getStyleID(ss *xlsxStyleSheet, style *Style) (int, error) {
 			getXfIDFuncs["alignment"](0, xf, style) &&
 			getXfIDFuncs["protection"](0, xf, style) {
 			styleID = xfID
-			return styleID, err
+			return
 		}
 	}
-	return styleID, err
+	return
 }
 
 // NewConditionalStyle provides a function to create style for conditional
-// format by given style format. The parameters are the same with the NewStyle
-// function. Note that the color field uses RGB color code and only support to
-// set font, fills, alignment and borders currently.
+// format by given style format. The parameters are the same as function
+// NewStyle(). Note that the color field uses RGB color code and only support
+// to set font, fills, alignment and borders currently.
 func (f *File) NewConditionalStyle(style string) (int, error) {
-	s, err := f.stylesReader()
-	if err != nil {
-		return 0, err
-	}
+	s := f.stylesReader()
 	fs, err := parseFormatStyleSet(style)
 	if err != nil {
 		return 0, err
@@ -2144,7 +1985,7 @@ func (f *File) NewConditionalStyle(style string) (int, error) {
 		dxf.Border = newBorders(fs)
 	}
 	if fs.Font != nil {
-		dxf.Font, _ = f.newFont(fs)
+		dxf.Font = f.newFont(fs)
 	}
 	dxfStr, _ := xml.Marshal(dxf)
 	if s.Dxfs == nil {
@@ -2159,99 +2000,59 @@ func (f *File) NewConditionalStyle(style string) (int, error) {
 
 // GetDefaultFont provides the default font name currently set in the
 // workbook. The spreadsheet generated by excelize default font is Calibri.
-func (f *File) GetDefaultFont() (string, error) {
-	font, err := f.readDefaultFont()
-	if err != nil {
-		return "", err
-	}
-	return *font.Name.Val, err
+func (f *File) GetDefaultFont() string {
+	font := f.readDefaultFont()
+	return *font.Name.Val
 }
 
 // SetDefaultFont changes the default font in the workbook.
-func (f *File) SetDefaultFont(fontName string) error {
-	font, err := f.readDefaultFont()
-	if err != nil {
-		return err
-	}
+func (f *File) SetDefaultFont(fontName string) {
+	font := f.readDefaultFont()
 	font.Name.Val = stringPtr(fontName)
-	s, _ := f.stylesReader()
+	s := f.stylesReader()
 	s.Fonts.Font[0] = font
 	custom := true
 	s.CellStyles.CellStyle[0].CustomBuiltIn = &custom
-	return err
 }
 
 // readDefaultFont provides an un-marshalled font value.
-func (f *File) readDefaultFont() (*xlsxFont, error) {
-	s, err := f.stylesReader()
-	if err != nil {
-		return nil, err
-	}
-	return s.Fonts.Font[0], err
+func (f *File) readDefaultFont() *xlsxFont {
+	s := f.stylesReader()
+	return s.Fonts.Font[0]
 }
 
 // getFontID provides a function to get font ID.
-// If given font does not exist, will return -1.
-func (f *File) getFontID(styleSheet *xlsxStyleSheet, style *Style) (int, error) {
-	var err error
-	fontID := -1
+// If given font is not exist, will return -1.
+func (f *File) getFontID(styleSheet *xlsxStyleSheet, style *Style) (fontID int) {
+	fontID = -1
 	if styleSheet.Fonts == nil || style.Font == nil {
-		return fontID, err
+		return
 	}
 	for idx, fnt := range styleSheet.Fonts.Font {
-		font, err := f.newFont(style)
-		if err != nil {
-			return fontID, err
-		}
-		if reflect.DeepEqual(*fnt, *font) {
+		if reflect.DeepEqual(*fnt, *f.newFont(style)) {
 			fontID = idx
-			return fontID, err
-		}
-	}
-	return fontID, err
-}
-
-// newFontColor set font color by given styles.
-func newFontColor(font *Font) *xlsxColor {
-	var fontColor *xlsxColor
-	prepareFontColor := func() {
-		if fontColor != nil {
 			return
 		}
-		fontColor = &xlsxColor{}
 	}
-	if font.Color != "" {
-		prepareFontColor()
-		fontColor.RGB = getPaletteColor(font.Color)
-	}
-	if font.ColorIndexed >= 0 && font.ColorIndexed <= len(IndexedColorMapping)+1 {
-		prepareFontColor()
-		fontColor.Indexed = font.ColorIndexed
-	}
-	if font.ColorTheme != nil {
-		prepareFontColor()
-		fontColor.Theme = font.ColorTheme
-	}
-	if font.ColorTint != 0 {
-		prepareFontColor()
-		fontColor.Tint = font.ColorTint
-	}
-	return fontColor
+	return
 }
 
 // newFont provides a function to add font style by given cell format
 // settings.
-func (f *File) newFont(style *Style) (*xlsxFont, error) {
-	var err error
+func (f *File) newFont(style *Style) *xlsxFont {
+	fontUnderlineType := map[string]string{"single": "single", "double": "double"}
 	if style.Font.Size < MinFontSize {
 		style.Font.Size = 11
 	}
+	if style.Font.Color == "" {
+		style.Font.Color = "#000000"
+	}
 	fnt := xlsxFont{
 		Sz:     &attrValFloat{Val: float64Ptr(style.Font.Size)},
+		Color:  &xlsxColor{RGB: getPaletteColor(style.Font.Color)},
 		Name:   &attrValString{Val: stringPtr(style.Font.Family)},
 		Family: &attrValInt{Val: intPtr(2)},
 	}
-	fnt.Color = newFontColor(style.Font)
 	if style.Font.Bold {
 		fnt.B = &attrValBool{Val: &style.Font.Bold}
 	}
@@ -2259,21 +2060,20 @@ func (f *File) newFont(style *Style) (*xlsxFont, error) {
 		fnt.I = &attrValBool{Val: &style.Font.Italic}
 	}
 	if *fnt.Name.Val == "" {
-		if *fnt.Name.Val, err = f.GetDefaultFont(); err != nil {
-			return &fnt, err
-		}
+		*fnt.Name.Val = f.GetDefaultFont()
 	}
 	if style.Font.Strike {
 		fnt.Strike = &attrValBool{Val: &style.Font.Strike}
 	}
-	if idx := inStrSlice(supportedUnderlineTypes, style.Font.Underline, true); idx != -1 {
-		fnt.U = &attrValString{Val: stringPtr(supportedUnderlineTypes[idx])}
+	val, ok := fontUnderlineType[style.Font.Underline]
+	if ok {
+		fnt.U = &attrValString{Val: stringPtr(val)}
 	}
-	return &fnt, err
+	return &fnt
 }
 
 // getNumFmtID provides a function to get number format code ID.
-// If given number format code does not exist, will return -1.
+// If given number format code is not exist, will return -1.
 func getNumFmtID(styleSheet *xlsxStyleSheet, style *Style) (numFmtID int) {
 	numFmtID = -1
 	if _, ok := builtInNumFmt[style.NumFmt]; ok {
@@ -2370,7 +2170,7 @@ func setCustomNumFmt(styleSheet *xlsxStyleSheet, style *Style) int {
 }
 
 // getCustomNumFmtID provides a function to get custom number format code ID.
-// If given custom number format code does not exist, will return -1.
+// If given custom number format code is not exist, will return -1.
 func getCustomNumFmtID(styleSheet *xlsxStyleSheet, style *Style) (customNumFmtID int) {
 	customNumFmtID = -1
 	if styleSheet.NumFmts == nil {
@@ -2654,27 +2454,24 @@ func setCellXfs(style *xlsxStyleSheet, fontID, numFmtID, fillID, borderID int, a
 }
 
 // GetCellStyle provides a function to get cell style index by given worksheet
-// name and cell reference.
-func (f *File) GetCellStyle(sheet, cell string) (int, error) {
+// name and cell coordinates.
+func (f *File) GetCellStyle(sheet, axis string) (int, error) {
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
 		return 0, err
 	}
-	col, row, err := CellNameToCoordinates(cell)
+	cellData, col, row, err := f.prepareCell(ws, axis)
 	if err != nil {
 		return 0, err
 	}
-	prepareSheetXML(ws, col, row)
-	ws.Lock()
-	defer ws.Unlock()
-	return f.prepareCellStyle(ws, col, row, ws.SheetData.Row[row-1].C[col-1].S), err
+	return f.prepareCellStyle(ws, col, row, cellData.S), err
 }
 
 // SetCellStyle provides a function to add style attribute for cells by given
-// worksheet name, range reference and style ID. This function is concurrency
-// safe. Note that diagonalDown and diagonalUp type border should be use same
-// color in the same range. SetCellStyle will overwrite the existing
-// styles for the cell, it won't append or merge style with existing styles.
+// worksheet name, coordinate area and style ID. Note that diagonalDown and
+// diagonalUp type border should be use same color in the same coordinate
+// area. SetCellStyle will overwrite the existing styles for the cell, it
+// won't append or merge style with existing styles.
 //
 // For example create a borders of cell H9 on Sheet1:
 //
@@ -2784,7 +2581,7 @@ func (f *File) SetCellStyle(sheet, hCell, vCell string, styleID int) error {
 		return err
 	}
 
-	// Normalize the range, such correct C1:B3 to B1:C3.
+	// Normalize the coordinate area, such correct C1:B3 to B1:C3.
 	if vCol < hCol {
 		vCol, hCol = hCol, vCol
 	}
@@ -2807,17 +2604,6 @@ func (f *File) SetCellStyle(sheet, hCell, vCell string, styleID int) error {
 	makeContiguousColumns(ws, hRow, vRow, vCol)
 	ws.Lock()
 	defer ws.Unlock()
-
-	s, err := f.stylesReader()
-	if err != nil {
-		return err
-	}
-	s.Lock()
-	defer s.Unlock()
-	if styleID < 0 || s.CellXfs == nil || len(s.CellXfs.Xf) <= styleID {
-		return newInvalidStyleID(styleID)
-	}
-
 	for r := hRowIdx; r <= vRowIdx; r++ {
 		for k := hColIdx; k <= vColIdx; k++ {
 			ws.SheetData.Row[r].C[k].S = styleID
@@ -2940,7 +2726,7 @@ func (f *File) SetCellStyle(sheet, hCell, vCell string, styleID int) error {
 // type: minimum - The minimum parameter is used to set the lower limiting value
 // when the criteria is either "between" or "not between".
 //
-//	// Highlight cells rules: between...
+//	// Hightlight cells rules: between...
 //	f.SetConditionalFormat("Sheet1", "A1:A10", fmt.Sprintf(`[{"type":"cell","criteria":"between","format":%d,"minimum":"6","maximum":"8"}]`, format))
 //
 // type: maximum - The maximum parameter is used to set the upper limiting value
@@ -2958,12 +2744,12 @@ func (f *File) SetCellStyle(sheet, hCell, vCell string, styleID int) error {
 //
 // type: duplicate - The duplicate type is used to highlight duplicate cells in a range:
 //
-//	// Highlight cells rules: Duplicate Values...
+//	// Hightlight cells rules: Duplicate Values...
 //	f.SetConditionalFormat("Sheet1", "A1:A10", fmt.Sprintf(`[{"type":"duplicate","criteria":"=","format":%d}]`, format))
 //
 // type: unique - The unique type is used to highlight unique cells in a range:
 //
-//	// Highlight cells rules: Not Equal To...
+//	// Hightlight cells rules: Not Equal To...
 //	f.SetConditionalFormat("Sheet1", "A1:A10", fmt.Sprintf(`[{"type":"unique","criteria":"=","format":%d}]`, format))
 //
 // type: top - The top type is used to specify the top n values by number or percentage in a range:
@@ -3036,13 +2822,13 @@ func (f *File) SetCellStyle(sheet, hCell, vCell string, styleID int) error {
 // max_color - Same as min_color, see above.
 //
 // bar_color - Used for data_bar. Same as min_color, see above.
-func (f *File) SetConditionalFormat(sheet, reference, opts string) error {
-	var format []*conditionalOptions
-	err := json.Unmarshal([]byte(opts), &format)
+func (f *File) SetConditionalFormat(sheet, area, formatSet string) error {
+	var format []*formatConditional
+	err := json.Unmarshal([]byte(formatSet), &format)
 	if err != nil {
 		return err
 	}
-	drawContFmtFunc := map[string]func(p int, ct string, fmtCond *conditionalOptions) *xlsxCfRule{
+	drawContFmtFunc := map[string]func(p int, ct string, fmtCond *formatConditional) *xlsxCfRule{
 		"cellIs":          drawCondFmtCellIs,
 		"top10":           drawCondFmtTop10,
 		"aboveAverage":    drawCondFmtAboveAverage,
@@ -3051,7 +2837,7 @@ func (f *File) SetConditionalFormat(sheet, reference, opts string) error {
 		"2_color_scale":   drawCondFmtColorScale,
 		"3_color_scale":   drawCondFmtColorScale,
 		"dataBar":         drawCondFmtDataBar,
-		"expression":      drawCondFmtExp,
+		"expression":      drawConfFmtExp,
 	}
 
 	ws, err := f.workSheetReader(sheet)
@@ -3068,176 +2854,30 @@ func (f *File) SetConditionalFormat(sheet, reference, opts string) error {
 			// Check for valid criteria types.
 			ct, ok = criteriaType[v.Criteria]
 			if ok || vt == "expression" {
-				drawFunc, ok := drawContFmtFunc[vt]
+				drawfunc, ok := drawContFmtFunc[vt]
 				if ok {
-					cfRule = append(cfRule, drawFunc(p, ct, v))
+					cfRule = append(cfRule, drawfunc(p, ct, v))
 				}
 			}
 		}
 	}
 
 	ws.ConditionalFormatting = append(ws.ConditionalFormatting, &xlsxConditionalFormatting{
-		SQRef:  reference,
+		SQRef:  area,
 		CfRule: cfRule,
 	})
 	return err
 }
 
-// extractCondFmtCellIs provides a function to extract conditional format
-// settings for cell value (include between, not between, equal, not equal,
-// greater than and less than) by given conditional formatting rule.
-func extractCondFmtCellIs(c *xlsxCfRule) *conditionalOptions {
-	format := conditionalOptions{Type: "cell", Criteria: operatorType[c.Operator], Format: *c.DxfID}
-	if len(c.Formula) == 2 {
-		format.Minimum, format.Maximum = c.Formula[0], c.Formula[1]
-		return &format
-	}
-	format.Value = c.Formula[0]
-	return &format
-}
-
-// extractCondFmtTop10 provides a function to extract conditional format
-// settings for top N (default is top 10) by given conditional formatting
-// rule.
-func extractCondFmtTop10(c *xlsxCfRule) *conditionalOptions {
-	format := conditionalOptions{
-		Type:     "top",
-		Criteria: "=",
-		Format:   *c.DxfID,
-		Percent:  c.Percent,
-		Value:    strconv.Itoa(c.Rank),
-	}
-	if c.Bottom {
-		format.Type = "bottom"
-	}
-	return &format
-}
-
-// extractCondFmtAboveAverage provides a function to extract conditional format
-// settings for above average and below average by given conditional formatting
-// rule.
-func extractCondFmtAboveAverage(c *xlsxCfRule) *conditionalOptions {
-	return &conditionalOptions{
-		Type:         "average",
-		Criteria:     "=",
-		Format:       *c.DxfID,
-		AboveAverage: *c.AboveAverage,
-	}
-}
-
-// extractCondFmtDuplicateUniqueValues provides a function to extract
-// conditional format settings for duplicate and unique values by given
-// conditional formatting rule.
-func extractCondFmtDuplicateUniqueValues(c *xlsxCfRule) *conditionalOptions {
-	return &conditionalOptions{
-		Type: map[string]string{
-			"duplicateValues": "duplicate",
-			"uniqueValues":    "unique",
-		}[c.Type],
-		Criteria: "=",
-		Format:   *c.DxfID,
-	}
-}
-
-// extractCondFmtColorScale provides a function to extract conditional format
-// settings for color scale (include 2 color scale and 3 color scale) by given
-// conditional formatting rule.
-func extractCondFmtColorScale(c *xlsxCfRule) *conditionalOptions {
-	var format conditionalOptions
-	format.Type, format.Criteria = "2_color_scale", "="
-	values := len(c.ColorScale.Cfvo)
-	colors := len(c.ColorScale.Color)
-	if colors > 1 && values > 1 {
-		format.MinType = c.ColorScale.Cfvo[0].Type
-		if c.ColorScale.Cfvo[0].Val != "0" {
-			format.MinValue = c.ColorScale.Cfvo[0].Val
-		}
-		format.MinColor = "#" + strings.TrimPrefix(strings.ToUpper(c.ColorScale.Color[0].RGB), "FF")
-		format.MaxType = c.ColorScale.Cfvo[1].Type
-		if c.ColorScale.Cfvo[1].Val != "0" {
-			format.MaxValue = c.ColorScale.Cfvo[1].Val
-		}
-		format.MaxColor = "#" + strings.TrimPrefix(strings.ToUpper(c.ColorScale.Color[1].RGB), "FF")
-	}
-	if colors == 3 {
-		format.Type = "3_color_scale"
-		format.MidType = c.ColorScale.Cfvo[1].Type
-		if c.ColorScale.Cfvo[1].Val != "0" {
-			format.MidValue = c.ColorScale.Cfvo[1].Val
-		}
-		format.MidColor = "#" + strings.TrimPrefix(strings.ToUpper(c.ColorScale.Color[1].RGB), "FF")
-		format.MaxType = c.ColorScale.Cfvo[2].Type
-		if c.ColorScale.Cfvo[2].Val != "0" {
-			format.MaxValue = c.ColorScale.Cfvo[2].Val
-		}
-		format.MaxColor = "#" + strings.TrimPrefix(strings.ToUpper(c.ColorScale.Color[2].RGB), "FF")
-	}
-	return &format
-}
-
-// extractCondFmtDataBar provides a function to extract conditional format
-// settings for data bar by given conditional formatting rule.
-func extractCondFmtDataBar(c *xlsxCfRule) *conditionalOptions {
-	format := conditionalOptions{Type: "data_bar", Criteria: "="}
-	if c.DataBar != nil {
-		format.MinType = c.DataBar.Cfvo[0].Type
-		format.MaxType = c.DataBar.Cfvo[1].Type
-		format.BarColor = "#" + strings.TrimPrefix(strings.ToUpper(c.DataBar.Color[0].RGB), "FF")
-	}
-	return &format
-}
-
-// extractCondFmtExp provides a function to extract conditional format settings
-// for expression by given conditional formatting rule.
-func extractCondFmtExp(c *xlsxCfRule) *conditionalOptions {
-	format := conditionalOptions{Type: "formula", Format: *c.DxfID}
-	if len(c.Formula) > 0 {
-		format.Criteria = c.Formula[0]
-	}
-	return &format
-}
-
-// GetConditionalFormats returns conditional format settings by given worksheet
-// name.
-func (f *File) GetConditionalFormats(sheet string) (map[string]string, error) {
-	extractContFmtFunc := map[string]func(c *xlsxCfRule) *conditionalOptions{
-		"cellIs":          extractCondFmtCellIs,
-		"top10":           extractCondFmtTop10,
-		"aboveAverage":    extractCondFmtAboveAverage,
-		"duplicateValues": extractCondFmtDuplicateUniqueValues,
-		"uniqueValues":    extractCondFmtDuplicateUniqueValues,
-		"colorScale":      extractCondFmtColorScale,
-		"dataBar":         extractCondFmtDataBar,
-		"expression":      extractCondFmtExp,
-	}
-
-	conditionalFormats := make(map[string]string)
-	ws, err := f.workSheetReader(sheet)
-	if err != nil {
-		return conditionalFormats, err
-	}
-	for _, cf := range ws.ConditionalFormatting {
-		var opts []*conditionalOptions
-		for _, cr := range cf.CfRule {
-			if extractFunc, ok := extractContFmtFunc[cr.Type]; ok {
-				opts = append(opts, extractFunc(cr))
-			}
-		}
-		options, _ := json.Marshal(opts)
-		conditionalFormats[cf.SQRef] = string(options)
-	}
-	return conditionalFormats, err
-}
-
 // UnsetConditionalFormat provides a function to unset the conditional format
-// by given worksheet name and range reference.
-func (f *File) UnsetConditionalFormat(sheet, reference string) error {
+// by given worksheet name and range.
+func (f *File) UnsetConditionalFormat(sheet, area string) error {
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
 	for i, cf := range ws.ConditionalFormatting {
-		if cf.SQRef == reference {
+		if cf.SQRef == area {
 			ws.ConditionalFormatting = append(ws.ConditionalFormatting[:i], ws.ConditionalFormatting[i+1:]...)
 			return nil
 		}
@@ -3248,7 +2888,7 @@ func (f *File) UnsetConditionalFormat(sheet, reference string) error {
 // drawCondFmtCellIs provides a function to create conditional formatting rule
 // for cell value (include between, not between, equal, not equal, greater
 // than and less than) by given priority, criteria type and format settings.
-func drawCondFmtCellIs(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtCellIs(p int, ct string, format *formatConditional) *xlsxCfRule {
 	c := &xlsxCfRule{
 		Priority: p + 1,
 		Type:     validType[format.Type],
@@ -3256,10 +2896,13 @@ func drawCondFmtCellIs(p int, ct string, format *conditionalOptions) *xlsxCfRule
 		DxfID:    &format.Format,
 	}
 	// "between" and "not between" criteria require 2 values.
-	if ct == "between" || ct == "notBetween" {
-		c.Formula = append(c.Formula, []string{format.Minimum, format.Maximum}...)
+	_, ok := map[string]bool{"between": true, "notBetween": true}[ct]
+	if ok {
+		c.Formula = append(c.Formula, format.Minimum)
+		c.Formula = append(c.Formula, format.Maximum)
 	}
-	if idx := inStrSlice([]string{"equal", "notEqual", "greaterThan", "lessThan", "greaterThanOrEqual", "lessThanOrEqual", "containsText", "notContains", "beginsWith", "endsWith"}, ct, true); idx != -1 {
+	_, ok = map[string]bool{"equal": true, "notEqual": true, "greaterThan": true, "lessThan": true, "greaterThanOrEqual": true, "lessThanOrEqual": true, "containsText": true, "notContains": true, "beginsWith": true, "endsWith": true}[ct]
+	if ok {
 		c.Formula = append(c.Formula, format.Value)
 	}
 	return c
@@ -3268,7 +2911,7 @@ func drawCondFmtCellIs(p int, ct string, format *conditionalOptions) *xlsxCfRule
 // drawCondFmtTop10 provides a function to create conditional formatting rule
 // for top N (default is top 10) by given priority, criteria type and format
 // settings.
-func drawCondFmtTop10(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtTop10(p int, ct string, format *formatConditional) *xlsxCfRule {
 	c := &xlsxCfRule{
 		Priority: p + 1,
 		Bottom:   format.Type == "bottom",
@@ -3277,7 +2920,8 @@ func drawCondFmtTop10(p int, ct string, format *conditionalOptions) *xlsxCfRule 
 		DxfID:    &format.Format,
 		Percent:  format.Percent,
 	}
-	if rank, err := strconv.Atoi(format.Value); err == nil {
+	rank, err := strconv.Atoi(format.Value)
+	if err == nil {
 		c.Rank = rank
 	}
 	return c
@@ -3286,7 +2930,7 @@ func drawCondFmtTop10(p int, ct string, format *conditionalOptions) *xlsxCfRule 
 // drawCondFmtAboveAverage provides a function to create conditional
 // formatting rule for above average and below average by given priority,
 // criteria type and format settings.
-func drawCondFmtAboveAverage(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtAboveAverage(p int, ct string, format *formatConditional) *xlsxCfRule {
 	return &xlsxCfRule{
 		Priority:     p + 1,
 		Type:         validType[format.Type],
@@ -3298,7 +2942,7 @@ func drawCondFmtAboveAverage(p int, ct string, format *conditionalOptions) *xlsx
 // drawCondFmtDuplicateUniqueValues provides a function to create conditional
 // formatting rule for duplicate and unique values by given priority, criteria
 // type and format settings.
-func drawCondFmtDuplicateUniqueValues(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtDuplicateUniqueValues(p int, ct string, format *formatConditional) *xlsxCfRule {
 	return &xlsxCfRule{
 		Priority: p + 1,
 		Type:     validType[format.Type],
@@ -3309,7 +2953,7 @@ func drawCondFmtDuplicateUniqueValues(p int, ct string, format *conditionalOptio
 // drawCondFmtColorScale provides a function to create conditional formatting
 // rule for color scale (include 2 color scale and 3 color scale) by given
 // priority, criteria type and format settings.
-func drawCondFmtColorScale(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtColorScale(p int, ct string, format *formatConditional) *xlsxCfRule {
 	minValue := format.MinValue
 	if minValue == "" {
 		minValue = "0"
@@ -3346,7 +2990,7 @@ func drawCondFmtColorScale(p int, ct string, format *conditionalOptions) *xlsxCf
 
 // drawCondFmtDataBar provides a function to create conditional formatting
 // rule for data bar by given priority, criteria type and format settings.
-func drawCondFmtDataBar(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawCondFmtDataBar(p int, ct string, format *formatConditional) *xlsxCfRule {
 	return &xlsxCfRule{
 		Priority: p + 1,
 		Type:     validType[format.Type],
@@ -3357,9 +3001,9 @@ func drawCondFmtDataBar(p int, ct string, format *conditionalOptions) *xlsxCfRul
 	}
 }
 
-// drawCondFmtExp provides a function to create conditional formatting rule
+// drawConfFmtExp provides a function to create conditional formatting rule
 // for expression by given priority, criteria type and format settings.
-func drawCondFmtExp(p int, ct string, format *conditionalOptions) *xlsxCfRule {
+func drawConfFmtExp(p int, ct string, format *formatConditional) *xlsxCfRule {
 	return &xlsxCfRule{
 		Priority: p + 1,
 		Type:     validType[format.Type],
@@ -3376,16 +3020,16 @@ func getPaletteColor(color string) string {
 
 // themeReader provides a function to get the pointer to the xl/theme/theme1.xml
 // structure after deserialization.
-func (f *File) themeReader() (*xlsxTheme, error) {
-	if _, ok := f.Pkg.Load(defaultXMLPathTheme); !ok {
-		return nil, nil
-	}
-	theme := xlsxTheme{XMLNSa: NameSpaceDrawingML.Value, XMLNSr: SourceRelationship.Value}
-	if err := f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(defaultXMLPathTheme)))).
+func (f *File) themeReader() *xlsxTheme {
+	var (
+		err   error
+		theme xlsxTheme
+	)
+	if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML("xl/theme/theme1.xml")))).
 		Decode(&theme); err != nil && err != io.EOF {
-		return &theme, err
+		log.Printf("xml decoder error: %s", err)
 	}
-	return &theme, nil
+	return &theme
 }
 
 // ThemeColor applied the color with tint value.

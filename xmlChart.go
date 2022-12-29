@@ -171,11 +171,12 @@ type aEa struct {
 	Typeface string `xml:"typeface,attr"`
 }
 
-type xlsxCTTextFont struct {
-	Typeface    string `xml:"typeface,attr"`
-	Panose      string `xml:"panose,attr,omitempty"`
-	PitchFamily string `xml:"pitchFamily,attr,omitempty"`
-	Charset     string `xml:"Charset,attr,omitempty"`
+// aLatin (Latin Font) directly maps the a:latin element. This element
+// specifies that a Latin font be used for a specific run of text. This font is
+// specified with a typeface attribute much like the others but is specifically
+// classified as a Latin font.
+type aLatin struct {
+	Typeface string `xml:"typeface,attr"`
 }
 
 // aR directly maps the a:r element.
@@ -190,29 +191,29 @@ type aR struct {
 // properties are defined as direct formatting, since they are directly applied
 // to the run and supersede any formatting from styles.
 type aRPr struct {
-	AltLang    string          `xml:"altLang,attr,omitempty"`
-	B          bool            `xml:"b,attr"`
-	Baseline   int             `xml:"baseline,attr"`
-	Bmk        string          `xml:"bmk,attr,omitempty"`
-	Cap        string          `xml:"cap,attr,omitempty"`
-	Dirty      bool            `xml:"dirty,attr,omitempty"`
-	Err        bool            `xml:"err,attr,omitempty"`
-	I          bool            `xml:"i,attr"`
-	Kern       int             `xml:"kern,attr"`
-	Kumimoji   bool            `xml:"kumimoji,attr,omitempty"`
-	Lang       string          `xml:"lang,attr,omitempty"`
-	NoProof    bool            `xml:"noProof,attr,omitempty"`
-	NormalizeH bool            `xml:"normalizeH,attr,omitempty"`
-	SmtClean   bool            `xml:"smtClean,attr,omitempty"`
-	SmtID      uint64          `xml:"smtId,attr,omitempty"`
-	Spc        int             `xml:"spc,attr"`
-	Strike     string          `xml:"strike,attr,omitempty"`
-	Sz         float64         `xml:"sz,attr,omitempty"`
-	U          string          `xml:"u,attr,omitempty"`
-	SolidFill  *aSolidFill     `xml:"a:solidFill"`
-	Latin      *xlsxCTTextFont `xml:"a:latin"`
-	Ea         *aEa            `xml:"a:ea"`
-	Cs         *aCs            `xml:"a:cs"`
+	AltLang    string      `xml:"altLang,attr,omitempty"`
+	B          bool        `xml:"b,attr"`
+	Baseline   int         `xml:"baseline,attr"`
+	Bmk        string      `xml:"bmk,attr,omitempty"`
+	Cap        string      `xml:"cap,attr,omitempty"`
+	Dirty      bool        `xml:"dirty,attr,omitempty"`
+	Err        bool        `xml:"err,attr,omitempty"`
+	I          bool        `xml:"i,attr"`
+	Kern       int         `xml:"kern,attr"`
+	Kumimoji   bool        `xml:"kumimoji,attr,omitempty"`
+	Lang       string      `xml:"lang,attr,omitempty"`
+	NoProof    bool        `xml:"noProof,attr,omitempty"`
+	NormalizeH bool        `xml:"normalizeH,attr,omitempty"`
+	SmtClean   bool        `xml:"smtClean,attr,omitempty"`
+	SmtID      uint64      `xml:"smtId,attr,omitempty"`
+	Spc        int         `xml:"spc,attr"`
+	Strike     string      `xml:"strike,attr,omitempty"`
+	Sz         float64     `xml:"sz,attr,omitempty"`
+	U          string      `xml:"u,attr,omitempty"`
+	SolidFill  *aSolidFill `xml:"a:solidFill"`
+	Latin      *aLatin     `xml:"a:latin"`
+	Ea         *aEa        `xml:"a:ea"`
+	Cs         *aCs        `xml:"a:cs"`
 }
 
 // cSpPr (Shape Properties) directly maps the spPr element. This element
@@ -308,7 +309,6 @@ type cPlotArea struct {
 	BubbleChart    *cCharts `xml:"bubbleChart"`
 	DoughnutChart  *cCharts `xml:"doughnutChart"`
 	LineChart      *cCharts `xml:"lineChart"`
-	Line3DChart    *cCharts `xml:"line3DChart"`
 	PieChart       *cCharts `xml:"pieChart"`
 	Pie3DChart     *cCharts `xml:"pie3DChart"`
 	OfPieChart     *cCharts `xml:"ofPieChart"`
@@ -475,7 +475,7 @@ type cNumCache struct {
 	PtCount    *attrValInt `xml:"ptCount"`
 }
 
-// cDLbls (Data Labels) directly maps the dLbls element. This element serves
+// cDLbls (Data Lables) directly maps the dLbls element. This element serves
 // as a root element that specifies the settings for the data labels for an
 // entire series or the entire chart. It contains child elements that specify
 // the specific formatting and positioning settings.
@@ -518,47 +518,51 @@ type cPageMargins struct {
 	T      float64 `xml:"t,attr"`
 }
 
-// chartAxisOptions directly maps the format settings of the chart axis.
-type chartAxisOptions struct {
-	None                bool          `json:"none"`
-	Crossing            string        `json:"crossing"`
-	MajorGridlines      bool          `json:"major_grid_lines"`
-	MinorGridlines      bool          `json:"minor_grid_lines"`
-	MajorTickMark       string        `json:"major_tick_mark"`
-	MinorTickMark       string        `json:"minor_tick_mark"`
-	MinorUnitType       string        `json:"minor_unit_type"`
-	MajorUnit           float64       `json:"major_unit"`
-	MajorUnitType       string        `json:"major_unit_type"`
-	TickLabelSkip       int           `json:"tick_label_skip"`
-	DisplayUnits        string        `json:"display_units"`
-	DisplayUnitsVisible bool          `json:"display_units_visible"`
-	DateAxis            bool          `json:"date_axis"`
-	ReverseOrder        bool          `json:"reverse_order"`
-	Maximum             *float64      `json:"maximum"`
-	Minimum             *float64      `json:"minimum"`
-	NumFormat           string        `json:"number_format"`
-	Font                Font          `json:"font"`
-	LogBase             float64       `json:"logbase"`
-	NameLayout          layoutOptions `json:"name_layout"`
+// formatChartAxis directly maps the format settings of the chart axis.
+type formatChartAxis struct {
+	None                bool     `json:"none"`
+	Crossing            string   `json:"crossing"`
+	MajorGridlines      bool     `json:"major_grid_lines"`
+	MinorGridlines      bool     `json:"minor_grid_lines"`
+	MajorTickMark       string   `json:"major_tick_mark"`
+	MinorTickMark       string   `json:"minor_tick_mark"`
+	MinorUnitType       string   `json:"minor_unit_type"`
+	MajorUnit           float64  `json:"major_unit"`
+	MajorUnitType       string   `json:"major_unit_type"`
+	TickLabelSkip       int      `json:"tick_label_skip"`
+	DisplayUnits        string   `json:"display_units"`
+	DisplayUnitsVisible bool     `json:"display_units_visible"`
+	DateAxis            bool     `json:"date_axis"`
+	ReverseOrder        bool     `json:"reverse_order"`
+	Maximum             *float64 `json:"maximum"`
+	Minimum             *float64 `json:"minimum"`
+	NumFormat           string   `json:"num_format"`
+	NumFont             struct {
+		Color     string `json:"color"`
+		Bold      bool   `json:"bold"`
+		Italic    bool   `json:"italic"`
+		Underline bool   `json:"underline"`
+	} `json:"num_font"`
+	LogBase    float64      `json:"logbase"`
+	NameLayout formatLayout `json:"name_layout"`
 }
 
-// chartDimensionOptions directly maps the dimension of the chart.
-type chartDimensionOptions struct {
+type formatChartDimension struct {
 	Width  int `json:"width"`
 	Height int `json:"height"`
 }
 
-// chartOptions directly maps the format settings of the chart.
-type chartOptions struct {
-	Type       string                `json:"type"`
-	Series     []chartSeriesOptions  `json:"series"`
-	Format     pictureOptions        `json:"format"`
-	Dimension  chartDimensionOptions `json:"dimension"`
-	Legend     chartLegendOptions    `json:"legend"`
-	Title      chartTitleOptions     `json:"title"`
-	VaryColors bool                  `json:"vary_colors"`
-	XAxis      chartAxisOptions      `json:"x_axis"`
-	YAxis      chartAxisOptions      `json:"y_axis"`
+// formatChart directly maps the format settings of the chart.
+type formatChart struct {
+	Type       string               `json:"type"`
+	Series     []formatChartSeries  `json:"series"`
+	Format     formatPicture        `json:"format"`
+	Dimension  formatChartDimension `json:"dimension"`
+	Legend     formatChartLegend    `json:"legend"`
+	Title      formatChartTitle     `json:"title"`
+	VaryColors bool                 `json:"vary_colors"`
+	XAxis      formatChartAxis      `json:"x_axis"`
+	YAxis      formatChartAxis      `json:"y_axis"`
 	Chartarea  struct {
 		Border struct {
 			None bool `json:"none"`
@@ -590,7 +594,7 @@ type chartOptions struct {
 		Fill struct {
 			Color string `json:"color"`
 		} `json:"fill"`
-		Layout layoutOptions `json:"layout"`
+		Layout formatLayout `json:"layout"`
 	} `json:"plotarea"`
 	ShowBlanksAs   string `json:"show_blanks_as"`
 	ShowHiddenData bool   `json:"show_hidden_data"`
@@ -599,27 +603,26 @@ type chartOptions struct {
 	order          int
 }
 
-// chartLegendOptions directly maps the format settings of the chart legend.
-type chartLegendOptions struct {
-	None            bool          `json:"none"`
-	DeleteSeries    []int         `json:"delete_series"`
-	Font            Font          `json:"font"`
-	Layout          layoutOptions `json:"layout"`
-	Position        string        `json:"position"`
-	ShowLegendEntry bool          `json:"show_legend_entry"`
-	ShowLegendKey   bool          `json:"show_legend_key"`
+// formatChartLegend directly maps the format settings of the chart legend.
+type formatChartLegend struct {
+	None            bool         `json:"none"`
+	DeleteSeries    []int        `json:"delete_series"`
+	Font            Font         `json:"font"`
+	Layout          formatLayout `json:"layout"`
+	Position        string       `json:"position"`
+	ShowLegendEntry bool         `json:"show_legend_entry"`
+	ShowLegendKey   bool         `json:"show_legend_key"`
 }
 
-// chartSeriesOptions directly maps the format settings of the chart series.
-type chartSeriesOptions struct {
+// formatChartSeries directly maps the format settings of the chart series.
+type formatChartSeries struct {
 	Name       string `json:"name"`
 	Categories string `json:"categories"`
 	Values     string `json:"values"`
 	Line       struct {
-		None   bool    `json:"none"`
-		Color  string  `json:"color"`
-		Smooth bool    `json:"smooth"`
-		Width  float64 `json:"width"`
+		None  bool    `json:"none"`
+		Color string  `json:"color"`
+		Width float64 `json:"width"`
 	} `json:"line"`
 	Marker struct {
 		Symbol string  `json:"symbol"`
@@ -636,16 +639,16 @@ type chartSeriesOptions struct {
 	} `json:"marker"`
 }
 
-// chartTitleOptions directly maps the format settings of the chart title.
-type chartTitleOptions struct {
-	None    bool          `json:"none"`
-	Name    string        `json:"name"`
-	Overlay bool          `json:"overlay"`
-	Layout  layoutOptions `json:"layout"`
+// formatChartTitle directly maps the format settings of the chart title.
+type formatChartTitle struct {
+	None    bool         `json:"none"`
+	Name    string       `json:"name"`
+	Overlay bool         `json:"overlay"`
+	Layout  formatLayout `json:"layout"`
 }
 
-// layoutOptions directly maps the format settings of the element layout.
-type layoutOptions struct {
+// formatLayout directly maps the format settings of the element layout.
+type formatLayout struct {
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
 	Width  float64 `json:"width"`

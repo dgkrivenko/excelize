@@ -393,34 +393,16 @@ func TestCalcCellValue(t *testing.T) {
 		"=ACOSH(2.5)":      "1.56679923697241",
 		"=ACOSH(5)":        "2.29243166956118",
 		"=ACOSH(ACOSH(5))": "1.47138332153668",
-		// _xlfn.ACOT
+		// ACOT
 		"=_xlfn.ACOT(1)":             "0.785398163397448",
 		"=_xlfn.ACOT(-2)":            "2.67794504458899",
 		"=_xlfn.ACOT(0)":             "1.5707963267949",
 		"=_xlfn.ACOT(_xlfn.ACOT(0))": "0.566911504941009",
-		// _xlfn.ACOTH
+		// ACOTH
 		"=_xlfn.ACOTH(-5)":      "-0.202732554054082",
 		"=_xlfn.ACOTH(1.1)":     "1.52226121886171",
 		"=_xlfn.ACOTH(2)":       "0.549306144334055",
 		"=_xlfn.ACOTH(ABS(-2))": "0.549306144334055",
-		// _xlfn.AGGREGATE
-		"=_xlfn.AGGREGATE(1,0,A1:A6)":    "1.5",
-		"=_xlfn.AGGREGATE(2,0,A1:A6)":    "4",
-		"=_xlfn.AGGREGATE(3,0,A1:A6)":    "4",
-		"=_xlfn.AGGREGATE(4,0,A1:A6)":    "3",
-		"=_xlfn.AGGREGATE(5,0,A1:A6)":    "0",
-		"=_xlfn.AGGREGATE(6,0,A1:A6)":    "0",
-		"=_xlfn.AGGREGATE(7,0,A1:A6)":    "1.29099444873581",
-		"=_xlfn.AGGREGATE(8,0,A1:A6)":    "1.11803398874989",
-		"=_xlfn.AGGREGATE(9,0,A1:A6)":    "6",
-		"=_xlfn.AGGREGATE(10,0,A1:A6)":   "1.66666666666667",
-		"=_xlfn.AGGREGATE(11,0,A1:A6)":   "1.25",
-		"=_xlfn.AGGREGATE(12,0,A1:A6)":   "1.5",
-		"=_xlfn.AGGREGATE(14,0,A1:A6,1)": "3",
-		"=_xlfn.AGGREGATE(15,0,A1:A6,1)": "0",
-		"=_xlfn.AGGREGATE(16,0,A1:A6,1)": "3",
-		"=_xlfn.AGGREGATE(17,0,A1:A6,1)": "0.75",
-		"=_xlfn.AGGREGATE(19,0,A1:A6,1)": "0.25",
 		// ARABIC
 		"=_xlfn.ARABIC(\"IV\")":       "4",
 		"=_xlfn.ARABIC(\"-IV\")":      "-4",
@@ -809,31 +791,6 @@ func TestCalcCellValue(t *testing.T) {
 		// POISSON
 		"=POISSON(20,25,FALSE)": "0.0519174686084913",
 		"=POISSON(35,40,TRUE)":  "0.242414197690103",
-		// SUBTOTAL
-		"=SUBTOTAL(1,A1:A6)":         "1.5",
-		"=SUBTOTAL(2,A1:A6)":         "4",
-		"=SUBTOTAL(3,A1:A6)":         "4",
-		"=SUBTOTAL(4,A1:A6)":         "3",
-		"=SUBTOTAL(5,A1:A6)":         "0",
-		"=SUBTOTAL(6,A1:A6)":         "0",
-		"=SUBTOTAL(7,A1:A6)":         "1.29099444873581",
-		"=SUBTOTAL(8,A1:A6)":         "1.11803398874989",
-		"=SUBTOTAL(9,A1:A6)":         "6",
-		"=SUBTOTAL(10,A1:A6)":        "1.66666666666667",
-		"=SUBTOTAL(11,A1:A6)":        "1.25",
-		"=SUBTOTAL(101,A1:A6)":       "1.5",
-		"=SUBTOTAL(102,A1:A6)":       "4",
-		"=SUBTOTAL(103,A1:A6)":       "4",
-		"=SUBTOTAL(104,A1:A6)":       "3",
-		"=SUBTOTAL(105,A1:A6)":       "0",
-		"=SUBTOTAL(106,A1:A6)":       "0",
-		"=SUBTOTAL(107,A1:A6)":       "1.29099444873581",
-		"=SUBTOTAL(108,A1:A6)":       "1.11803398874989",
-		"=SUBTOTAL(109,A1:A6)":       "6",
-		"=SUBTOTAL(109,A1:A6,A1:A6)": "12",
-		"=SUBTOTAL(110,A1:A6)":       "1.66666666666667",
-		"=SUBTOTAL(111,A1:A6)":       "1.25",
-		"=SUBTOTAL(111,A1:A6,A1:A6)": "1.25",
 		// SUM
 		"=SUM(1,2)":                           "3",
 		`=SUM("",1,2)`:                        "3",
@@ -1464,7 +1421,6 @@ func TestCalcCellValue(t *testing.T) {
 		"=OR(0)":                  "FALSE",
 		"=OR(1=2,2=2)":            "TRUE",
 		"=OR(1=2,2=3)":            "FALSE",
-		"=OR(1=1,2=3)":            "TRUE",
 		"=OR(\"TRUE\",\"FALSE\")": "TRUE",
 		// SWITCH
 		"=SWITCH(1,1,\"A\",2,\"B\",3,\"C\",\"N\")": "A",
@@ -1780,7 +1736,7 @@ func TestCalcCellValue(t *testing.T) {
 		"=UPPER(\"TEST 123\")": "TEST 123",
 		// VALUE
 		"=VALUE(\"50\")":                  "50",
-		"=VALUE(\"1.0E-07\")":             "0.0000001",
+		"=VALUE(\"1.0E-07\")":             "1E-07",
 		"=VALUE(\"5,000\")":               "5000",
 		"=VALUE(\"20%\")":                 "0.2",
 		"=VALUE(\"12:00:00\")":            "0.5",
@@ -1800,23 +1756,14 @@ func TestCalcCellValue(t *testing.T) {
 		// Excel Lookup and Reference Functions
 		// ADDRESS
 		"=ADDRESS(1,1,1,TRUE)":            "$A$1",
-		"=ADDRESS(1,2,1,TRUE)":            "$B$1",
 		"=ADDRESS(1,1,1,FALSE)":           "R1C1",
-		"=ADDRESS(1,2,1,FALSE)":           "R1C2",
 		"=ADDRESS(1,1,2,TRUE)":            "A$1",
-		"=ADDRESS(1,2,2,TRUE)":            "B$1",
 		"=ADDRESS(1,1,2,FALSE)":           "R1C[1]",
-		"=ADDRESS(1,2,2,FALSE)":           "R1C[2]",
 		"=ADDRESS(1,1,3,TRUE)":            "$A1",
-		"=ADDRESS(1,2,3,TRUE)":            "$B1",
 		"=ADDRESS(1,1,3,FALSE)":           "R[1]C1",
-		"=ADDRESS(1,2,3,FALSE)":           "R[1]C2",
 		"=ADDRESS(1,1,4,TRUE)":            "A1",
-		"=ADDRESS(1,2,4,TRUE)":            "B1",
 		"=ADDRESS(1,1,4,FALSE)":           "R[1]C[1]",
-		"=ADDRESS(1,2,4,FALSE)":           "R[1]C[2]",
-		"=ADDRESS(1,1,4,TRUE,\"\")":       "!A1",
-		"=ADDRESS(1,2,4,TRUE,\"\")":       "!B1",
+		"=ADDRESS(1,1,4,TRUE,\"\")":       "A1",
 		"=ADDRESS(1,1,4,TRUE,\"Sheet1\")": "Sheet1!A1",
 		// CHOOSE
 		"=CHOOSE(4,\"red\",\"blue\",\"green\",\"brown\")": "brown",
@@ -2396,15 +2343,6 @@ func TestCalcCellValue(t *testing.T) {
 		"=_xlfn.ACOTH()":               "ACOTH requires 1 numeric argument",
 		`=_xlfn.ACOTH("X")`:            "strconv.ParseFloat: parsing \"X\": invalid syntax",
 		"=_xlfn.ACOTH(_xlfn.ACOTH(2))": "#NUM!",
-		// _xlfn.AGGREGATE
-		"=_xlfn.AGGREGATE()":             "AGGREGATE requires at least 3 arguments",
-		"=_xlfn.AGGREGATE(\"\",0,A4:A5)": "strconv.ParseFloat: parsing \"\": invalid syntax",
-		"=_xlfn.AGGREGATE(1,\"\",A4:A5)": "strconv.ParseFloat: parsing \"\": invalid syntax",
-		"=_xlfn.AGGREGATE(0,A4:A5)":      "AGGREGATE has invalid function_num",
-		"=_xlfn.AGGREGATE(1,8,A4:A5)":    "AGGREGATE has invalid options",
-		"=_xlfn.AGGREGATE(1,0,A5:A6)":    "#DIV/0!",
-		"=_xlfn.AGGREGATE(13,0,A1:A6)":   "#N/A",
-		"=_xlfn.AGGREGATE(18,0,A1:A6,1)": "#NUM!",
 		// _xlfn.ARABIC
 		"=_xlfn.ARABIC()": "ARABIC requires 1 numeric argument",
 		"=_xlfn.ARABIC(\"" + strings.Repeat("I", 256) + "\")": "#VALUE!",
@@ -2672,11 +2610,6 @@ func TestCalcCellValue(t *testing.T) {
 		"=POISSON(0,\"\",FALSE)": "strconv.ParseFloat: parsing \"\": invalid syntax",
 		"=POISSON(0,0,\"\")":     "strconv.ParseBool: parsing \"\": invalid syntax",
 		"=POISSON(0,-1,TRUE)":    "#N/A",
-		// SUBTOTAL
-		"=SUBTOTAL()":           "SUBTOTAL requires at least 2 arguments",
-		"=SUBTOTAL(\"\",A4:A5)": "strconv.ParseFloat: parsing \"\": invalid syntax",
-		"=SUBTOTAL(0,A4:A5)":    "SUBTOTAL has invalid function_num",
-		"=SUBTOTAL(1,A5:A6)":    "#DIV/0!",
 		// SUM
 		"=SUM((":             ErrInvalidFormula.Error(),
 		"=SUM(-)":            ErrInvalidFormula.Error(),
@@ -4389,19 +4322,16 @@ func TestCalcCellValue(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// Test get calculated cell value on not formula cell
+	// Test get calculated cell value on not formula cell.
 	f := prepareCalcData(cellData)
 	result, err := f.CalcCellValue("Sheet1", "A1")
 	assert.NoError(t, err)
 	assert.Equal(t, "", result)
-	// Test get calculated cell value on not exists worksheet
+	// Test get calculated cell value on not exists worksheet.
 	f = prepareCalcData(cellData)
 	_, err = f.CalcCellValue("SheetN", "A1")
-	assert.EqualError(t, err, "sheet SheetN does not exist")
-	// Test get calculated cell value with invalid sheet name
-	_, err = f.CalcCellValue("Sheet:1", "A1")
-	assert.EqualError(t, err, ErrSheetNameInvalid.Error())
-	// Test get calculated cell value with not support formula
+	assert.EqualError(t, err, "sheet SheetN is not exist")
+	// Test get calculated cell value with not support formula.
 	f = prepareCalcData(cellData)
 	assert.NoError(t, f.SetCellFormula("Sheet1", "A1", "=UNSUPPORT(A1)"))
 	_, err = f.CalcCellValue("Sheet1", "A1")
@@ -5235,8 +5165,8 @@ func TestCalcXLOOKUP(t *testing.T) {
 		"=XLOOKUP(29,C2:H2,C3:H3,NA(),-1,1)":  "D3",
 	}
 	for formula, expected := range formulaList {
-		assert.NoError(t, f.SetCellFormula("Sheet1", "D4", formula))
-		result, err := f.CalcCellValue("Sheet1", "D4")
+		assert.NoError(t, f.SetCellFormula("Sheet1", "D3", formula))
+		result, err := f.CalcCellValue("Sheet1", "D3")
 		assert.NoError(t, err, formula)
 		assert.Equal(t, expected, result, formula)
 	}

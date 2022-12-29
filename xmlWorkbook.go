@@ -219,7 +219,7 @@ type xlsxDefinedNames struct {
 // http://schemas.openxmlformats.org/spreadsheetml/2006/main This element
 // defines a defined name within this workbook. A defined name is descriptive
 // text that is used to represents a cell, range of cells, formula, or constant
-// value. For a descriptions of the attributes see https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.definedname
+// value. For a descriptions of the attributes see https://docs.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.definedname
 type xlsxDefinedName struct {
 	Comment           string `xml:"comment,attr,omitempty"`
 	CustomMenu        string `xml:"customMenu,attr,omitempty"`
@@ -308,23 +308,8 @@ type xlsxCustomWorkbookView struct {
 // DefinedName directly maps the name for a cell or cell range on a
 // worksheet.
 type DefinedName struct {
-	Name     string `json:"name,omitempty"`
-	Comment  string `json:"comment,omitempty"`
-	RefersTo string `json:"refers_to,omitempty"`
-	Scope    string `json:"scope,omitempty"`
-}
-
-// WorkbookPropsOptions directly maps the settings of workbook proprieties.
-type WorkbookPropsOptions struct {
-	Date1904      *bool   `json:"date_1994,omitempty"`
-	FilterPrivacy *bool   `json:"filter_privacy,omitempty"`
-	CodeName      *string `json:"code_name,omitempty"`
-}
-
-// WorkbookProtectionOptions directly maps the settings of workbook protection.
-type WorkbookProtectionOptions struct {
-	AlgorithmName string `json:"algorithmName,omitempty"`
-	Password      string `json:"password,omitempty"`
-	LockStructure bool   `json:"lockStructure,omitempty"`
-	LockWindows   bool   `json:"lockWindows,omitempty"`
+	Name     string
+	Comment  string
+	RefersTo string
+	Scope    string
 }

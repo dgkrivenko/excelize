@@ -30,58 +30,69 @@ func NewFile() *File {
 	f.Pkg.Store("_rels/.rels", []byte(xml.Header+templateRels))
 	f.Pkg.Store(defaultXMLPathDocPropsApp, []byte(xml.Header+templateDocpropsApp))
 	f.Pkg.Store(defaultXMLPathDocPropsCore, []byte(xml.Header+templateDocpropsCore))
-	f.Pkg.Store(defaultXMLPathWorkbookRels, []byte(xml.Header+templateWorkbookRels))
+	f.Pkg.Store("xl/_rels/workbook.xml.rels", []byte(xml.Header+templateWorkbookRels))
 	f.Pkg.Store("xl/theme/theme1.xml", []byte(xml.Header+templateTheme))
 	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(xml.Header+templateSheet))
 	f.Pkg.Store(defaultXMLPathStyles, []byte(xml.Header+templateStyles))
 	f.Pkg.Store(defaultXMLPathWorkbook, []byte(xml.Header+templateWorkbook))
 	f.Pkg.Store(defaultXMLPathContentTypes, []byte(xml.Header+templateContentTypes))
 	f.SheetCount = 1
-	f.CalcChain, _ = f.calcChainReader()
+	f.CalcChain = f.calcChainReader()
 	f.Comments = make(map[string]*xlsxComments)
-	f.ContentTypes, _ = f.contentTypesReader()
+	f.ContentTypes = f.contentTypesReader()
 	f.Drawings = sync.Map{}
-	f.Styles, _ = f.stylesReader()
+	f.Styles = f.stylesReader()
 	f.DecodeVMLDrawing = make(map[string]*decodeVmlDrawing)
 	f.VMLDrawing = make(map[string]*vmlDrawing)
-	f.WorkBook, _ = f.workbookReader()
+	f.WorkBook = f.workbookReader()
 	f.Relationships = sync.Map{}
-	rels, _ := f.relsReader(defaultXMLPathWorkbookRels)
-	f.Relationships.Store(defaultXMLPathWorkbookRels, rels)
+	f.Relationships.Store("xl/_rels/workbook.xml.rels", f.relsReader("xl/_rels/workbook.xml.rels"))
 	f.sheetMap["Sheet1"] = "xl/worksheets/sheet1.xml"
 	ws, _ := f.workSheetReader("Sheet1")
 	f.Sheet.Store("xl/worksheets/sheet1.xml", ws)
-	f.Theme, _ = f.themeReader()
+	f.Theme = f.themeReader()
 	return f
 }
 
 // Save provides a function to override the spreadsheet with origin path.
-func (f *File) Save(opts ...Options) error {
+func (f *File) Save() error {
 	if f.Path == "" {
 		return ErrSave
 	}
-	for i := range opts {
-		f.options = &opts[i]
+	if f.options != nil {
+		return f.SaveAs(f.Path, *f.options)
 	}
-	return f.SaveAs(f.Path, *f.options)
+	return f.SaveAs(f.Path)
 }
 
 // SaveAs provides a function to create or update to a spreadsheet at the
 // provided path.
-func (f *File) SaveAs(name string, opts ...Options) error {
+func (f *File) SaveAs(name string, opt ...Options) error {
 	if len(name) > MaxFilePathLength {
 		return ErrMaxFilePathLength
 	}
 	f.Path = name
-	if _, ok := supportedContentTypes[filepath.Ext(f.Path)]; !ok {
+	contentType, ok := map[string]string{
+		".xlam": ContentTypeAddinMacro,
+		".xlsm": ContentTypeMacro,
+		".xlsx": ContentTypeSheetML,
+		".xltm": ContentTypeTemplateMacro,
+		".xltx": ContentTypeTemplate,
+	}[filepath.Ext(f.Path)]
+	if !ok {
 		return ErrWorkbookFileFormat
 	}
+	f.setContentTypePartProjectExtensions(contentType)
 	file, err := os.OpenFile(filepath.Clean(name), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	return f.Write(file, opts...)
+	f.options = nil
+	for i := range opt {
+		f.options = &opt[i]
+	}
+	return f.Write(file)
 }
 
 // Close closes and cleanup the open temporary file for the spreadsheet.
@@ -98,32 +109,17 @@ func (f *File) Close() error {
 		}
 		return true
 	})
-	for _, stream := range f.streams {
-		_ = stream.rawData.Close()
-	}
 	return err
 }
 
 // Write provides a function to write to an io.Writer.
-func (f *File) Write(w io.Writer, opts ...Options) error {
-	_, err := f.WriteTo(w, opts...)
+func (f *File) Write(w io.Writer) error {
+	_, err := f.WriteTo(w)
 	return err
 }
 
 // WriteTo implements io.WriterTo to write the file.
-func (f *File) WriteTo(w io.Writer, opts ...Options) (int64, error) {
-	for i := range opts {
-		f.options = &opts[i]
-	}
-	if len(f.Path) != 0 {
-		contentType, ok := supportedContentTypes[filepath.Ext(f.Path)]
-		if !ok {
-			return 0, ErrWorkbookFileFormat
-		}
-		if err := f.setContentTypePartProjectExtensions(contentType); err != nil {
-			return 0, err
-		}
-	}
+func (f *File) WriteTo(w io.Writer) (int64, error) {
 	if f.options != nil && f.options.Password != "" {
 		buf, err := f.WriteToBuffer()
 		if err != nil {
@@ -131,12 +127,10 @@ func (f *File) WriteTo(w io.Writer, opts ...Options) (int64, error) {
 		}
 		return buf.WriteTo(w)
 	}
-
 	n, err := f.writeDirectToWriter(w)
 	if err != nil {
 		return 0, err
 	}
-
 	return n, nil
 }
 
@@ -168,13 +162,11 @@ func (f *File) WriteToBuffer() (*bytes.Buffer, error) {
 // writeDirectToWriter provides a function to write to io.Writer.
 func (f *File) writeDirectToWriter(w io.Writer) (int64, error) {
 	zw := zip.NewWriter(w)
-
 	n, err := f.writeToZip(zw)
 	if err != nil {
 		_ = zw.Close()
 		return 0, err
 	}
-
 	return n, zw.Close()
 }
 
@@ -188,10 +180,9 @@ func (f *File) writeToZip(zw *zip.Writer) (int64, error) {
 	f.workBookWriter()
 	f.workSheetWriter()
 	f.relsWriter()
-	_ = f.sharedStringsLoader()
+	f.sharedStringsLoader()
 	f.sharedStringsWriter()
 	f.styleSheetWriter()
-	f.themeWriter()
 
 	var written int64
 
@@ -210,12 +201,13 @@ func (f *File) writeToZip(zw *zip.Writer) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
+
 		written += n
+		_ = stream.rawData.Close()
 	}
 	var err error
 	f.Pkg.Range(func(path, content interface{}) bool {
 		var n int
-
 		if err != nil {
 			return false
 		}
@@ -228,9 +220,6 @@ func (f *File) writeToZip(zw *zip.Writer) (int64, error) {
 			return false
 		}
 		n, err = fi.Write(content.([]byte))
-		if err != nil {
-			return false
-		}
 		written += int64(n)
 		return true
 	})
@@ -245,9 +234,6 @@ func (f *File) writeToZip(zw *zip.Writer) (int64, error) {
 			return false
 		}
 		n, err = fi.Write(f.readBytes(path.(string)))
-		if err != nil {
-			return false
-		}
 		written += int64(n)
 		return true
 	})

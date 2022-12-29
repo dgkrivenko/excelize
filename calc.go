@@ -59,19 +59,19 @@ const (
 	criteriaErr
 	criteriaRegexp
 
-	categoryWeightAndMass
-	categoryDistance
-	categoryTime
-	categoryPressure
-	categoryForce
-	categoryEnergy
-	categoryPower
-	categoryMagnetism
-	categoryTemperature
-	categoryVolumeAndLiquidMeasure
-	categoryArea
-	categoryInformation
-	categorySpeed
+	catgoryWeightAndMass
+	catgoryDistance
+	catgoryTime
+	catgoryPressure
+	catgoryForce
+	catgoryEnergy
+	catgoryPower
+	catgoryMagnetism
+	catgoryTemperature
+	catgoryVolumeAndLiquidMeasure
+	catgoryArea
+	catgoryInformation
+	catgorySpeed
 
 	matchModeExact      = 0
 	matchModeMinGreater = 1
@@ -339,7 +339,6 @@ type formulaFuncs struct {
 //	ACOT
 //	ACOTH
 //	ADDRESS
-//	AGGREGATE
 //	AMORDEGRC
 //	AMORLINC
 //	AND
@@ -701,7 +700,6 @@ type formulaFuncs struct {
 //	STDEVPA
 //	STEYX
 //	SUBSTITUTE
-//	SUBTOTAL
 //	SUM
 //	SUMIF
 //	SUMIFS
@@ -791,14 +789,10 @@ func (f *File) calcCellValue(ctx *calcContext, sheet, cell string) (result strin
 		return
 	}
 	result = token.Value()
-	if isNum, precision, decimal := isNumeric(result); isNum {
-		if precision > 15 {
-			result = strings.ToUpper(strconv.FormatFloat(decimal, 'G', 15, 64))
-			return
-		}
-		if !strings.HasPrefix(result, "0") {
-			result = strings.ToUpper(strconv.FormatFloat(decimal, 'f', -1, 64))
-		}
+	isNum, precision := isNumeric(result)
+	if isNum && (precision > 15 || precision == 0) {
+		num := roundPrecision(result, -1)
+		result = strings.ToUpper(num)
 	}
 	return
 }
@@ -874,6 +868,7 @@ func (f *File) evalInfixExp(ctx *calcContext, sheet, cell string, tokens []efp.T
 	var err error
 	opdStack, optStack, opfStack, opfdStack, opftStack, argsStack := NewStack(), NewStack(), NewStack(), NewStack(), NewStack(), NewStack()
 	var inArray, inArrayRow bool
+	var arrayRow []formulaArg
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
 
@@ -982,6 +977,7 @@ func (f *File) evalInfixExp(ctx *calcContext, sheet, cell string, tokens []efp.T
 				argsStack.Peek().(*list.List).PushBack(newStringFormulaArg(token.TValue))
 			}
 			if inArrayRow && isOperand(token) {
+				arrayRow = append(arrayRow, tokenToFormulaArg(token))
 				continue
 			}
 			if inArrayRow && isFunctionStopToken(token) {
@@ -990,7 +986,7 @@ func (f *File) evalInfixExp(ctx *calcContext, sheet, cell string, tokens []efp.T
 			}
 			if inArray && isFunctionStopToken(token) {
 				argsStack.Peek().(*list.List).PushBack(opfdStack.Pop())
-				inArray = false
+				arrayRow, inArray = []formulaArg{}, false
 				continue
 			}
 			if err = f.evalInfixExpFunc(ctx, sheet, cell, token, nextToken, opfStack, opdStack, opftStack, opfdStack, argsStack); err != nil {
@@ -1132,7 +1128,7 @@ func calcLe(rOpd, lOpd formulaArg, opdStack *Stack) error {
 	return nil
 }
 
-// calcG evaluate greater than arithmetic operations.
+// calcG evaluate greater than or equal arithmetic operations.
 func calcG(rOpd, lOpd formulaArg, opdStack *Stack) error {
 	if rOpd.Type == ArgNumber && lOpd.Type == ArgNumber {
 		opdStack.Push(newBoolFormulaArg(lOpd.Number > rOpd.Number))
@@ -1287,28 +1283,28 @@ func calculate(opdStack *Stack, opt efp.Token) error {
 func (f *File) parseOperatorPrefixToken(optStack, opdStack *Stack, token efp.Token) (err error) {
 	if optStack.Len() == 0 {
 		optStack.Push(token)
-		return
-	}
-	tokenPriority := getPriority(token)
-	topOpt := optStack.Peek().(efp.Token)
-	topOptPriority := getPriority(topOpt)
-	if tokenPriority > topOptPriority {
-		optStack.Push(token)
-		return
-	}
-	for tokenPriority <= topOptPriority {
-		optStack.Pop()
-		if err = calculate(opdStack, topOpt); err != nil {
-			return
+	} else {
+		tokenPriority := getPriority(token)
+		topOpt := optStack.Peek().(efp.Token)
+		topOptPriority := getPriority(topOpt)
+		if tokenPriority > topOptPriority {
+			optStack.Push(token)
+		} else {
+			for tokenPriority <= topOptPriority {
+				optStack.Pop()
+				if err = calculate(opdStack, topOpt); err != nil {
+					return
+				}
+				if optStack.Len() > 0 {
+					topOpt = optStack.Peek().(efp.Token)
+					topOptPriority = getPriority(topOpt)
+					continue
+				}
+				break
+			}
+			optStack.Push(token)
 		}
-		if optStack.Len() > 0 {
-			topOpt = optStack.Peek().(efp.Token)
-			topOptPriority = getPriority(topOpt)
-			continue
-		}
-		break
 	}
-	optStack.Push(token)
 	return
 }
 
@@ -1412,7 +1408,7 @@ func (f *File) parseReference(ctx *calcContext, sheet, reference string) (arg fo
 		cr := cellRef{}
 		if len(tokens) == 2 { // have a worksheet name
 			cr.Sheet = tokens[0]
-			// cast to cell reference
+			// cast to cell coordinates
 			if cr.Col, cr.Row, err = CellNameToCoordinates(tokens[1]); err != nil {
 				// cast to column
 				if cr.Col, err = ColumnNameToNumber(tokens[1]); err != nil {
@@ -1432,7 +1428,7 @@ func (f *File) parseReference(ctx *calcContext, sheet, reference string) (arg fo
 			refs.PushBack(cr)
 			continue
 		}
-		// cast to cell reference
+		// cast to cell coordinates
 		if cr.Col, cr.Row, err = CellNameToCoordinates(tokens[0]); err != nil {
 			// cast to column
 			if cr.Col, err = ColumnNameToNumber(tokens[0]); err != nil {
@@ -2093,13 +2089,13 @@ func (fn *formulaFuncs) COMPLEX(argsList *list.List) formulaArg {
 // cmplx2str replace complex number string characters.
 func cmplx2str(num complex128, suffix string) string {
 	realPart, imagPart := fmt.Sprint(real(num)), fmt.Sprint(imag(num))
-	isNum, i, decimal := isNumeric(realPart)
+	isNum, i := isNumeric(realPart)
 	if isNum && i > 15 {
-		realPart = strconv.FormatFloat(decimal, 'G', 15, 64)
+		realPart = roundPrecision(realPart, -1)
 	}
-	isNum, i, decimal = isNumeric(imagPart)
+	isNum, i = isNumeric(imagPart)
 	if isNum && i > 15 {
-		imagPart = strconv.FormatFloat(decimal, 'G', 15, 64)
+		imagPart = roundPrecision(imagPart, -1)
 	}
 	c := realPart
 	if imag(num) > 0 {
@@ -2144,177 +2140,177 @@ type conversionUnit struct {
 // formula function CONVERT.
 var conversionUnits = map[string]conversionUnit{
 	// weight and mass
-	"g":        {group: categoryWeightAndMass, allowPrefix: true},
-	"sg":       {group: categoryWeightAndMass, allowPrefix: false},
-	"lbm":      {group: categoryWeightAndMass, allowPrefix: false},
-	"u":        {group: categoryWeightAndMass, allowPrefix: true},
-	"ozm":      {group: categoryWeightAndMass, allowPrefix: false},
-	"grain":    {group: categoryWeightAndMass, allowPrefix: false},
-	"cwt":      {group: categoryWeightAndMass, allowPrefix: false},
-	"shweight": {group: categoryWeightAndMass, allowPrefix: false},
-	"uk_cwt":   {group: categoryWeightAndMass, allowPrefix: false},
-	"lcwt":     {group: categoryWeightAndMass, allowPrefix: false},
-	"hweight":  {group: categoryWeightAndMass, allowPrefix: false},
-	"stone":    {group: categoryWeightAndMass, allowPrefix: false},
-	"ton":      {group: categoryWeightAndMass, allowPrefix: false},
-	"uk_ton":   {group: categoryWeightAndMass, allowPrefix: false},
-	"LTON":     {group: categoryWeightAndMass, allowPrefix: false},
-	"brton":    {group: categoryWeightAndMass, allowPrefix: false},
+	"g":        {group: catgoryWeightAndMass, allowPrefix: true},
+	"sg":       {group: catgoryWeightAndMass, allowPrefix: false},
+	"lbm":      {group: catgoryWeightAndMass, allowPrefix: false},
+	"u":        {group: catgoryWeightAndMass, allowPrefix: true},
+	"ozm":      {group: catgoryWeightAndMass, allowPrefix: false},
+	"grain":    {group: catgoryWeightAndMass, allowPrefix: false},
+	"cwt":      {group: catgoryWeightAndMass, allowPrefix: false},
+	"shweight": {group: catgoryWeightAndMass, allowPrefix: false},
+	"uk_cwt":   {group: catgoryWeightAndMass, allowPrefix: false},
+	"lcwt":     {group: catgoryWeightAndMass, allowPrefix: false},
+	"hweight":  {group: catgoryWeightAndMass, allowPrefix: false},
+	"stone":    {group: catgoryWeightAndMass, allowPrefix: false},
+	"ton":      {group: catgoryWeightAndMass, allowPrefix: false},
+	"uk_ton":   {group: catgoryWeightAndMass, allowPrefix: false},
+	"LTON":     {group: catgoryWeightAndMass, allowPrefix: false},
+	"brton":    {group: catgoryWeightAndMass, allowPrefix: false},
 	// distance
-	"m":         {group: categoryDistance, allowPrefix: true},
-	"mi":        {group: categoryDistance, allowPrefix: false},
-	"Nmi":       {group: categoryDistance, allowPrefix: false},
-	"in":        {group: categoryDistance, allowPrefix: false},
-	"ft":        {group: categoryDistance, allowPrefix: false},
-	"yd":        {group: categoryDistance, allowPrefix: false},
-	"ang":       {group: categoryDistance, allowPrefix: true},
-	"ell":       {group: categoryDistance, allowPrefix: false},
-	"ly":        {group: categoryDistance, allowPrefix: false},
-	"parsec":    {group: categoryDistance, allowPrefix: false},
-	"pc":        {group: categoryDistance, allowPrefix: false},
-	"Pica":      {group: categoryDistance, allowPrefix: false},
-	"Picapt":    {group: categoryDistance, allowPrefix: false},
-	"pica":      {group: categoryDistance, allowPrefix: false},
-	"survey_mi": {group: categoryDistance, allowPrefix: false},
+	"m":         {group: catgoryDistance, allowPrefix: true},
+	"mi":        {group: catgoryDistance, allowPrefix: false},
+	"Nmi":       {group: catgoryDistance, allowPrefix: false},
+	"in":        {group: catgoryDistance, allowPrefix: false},
+	"ft":        {group: catgoryDistance, allowPrefix: false},
+	"yd":        {group: catgoryDistance, allowPrefix: false},
+	"ang":       {group: catgoryDistance, allowPrefix: true},
+	"ell":       {group: catgoryDistance, allowPrefix: false},
+	"ly":        {group: catgoryDistance, allowPrefix: false},
+	"parsec":    {group: catgoryDistance, allowPrefix: false},
+	"pc":        {group: catgoryDistance, allowPrefix: false},
+	"Pica":      {group: catgoryDistance, allowPrefix: false},
+	"Picapt":    {group: catgoryDistance, allowPrefix: false},
+	"pica":      {group: catgoryDistance, allowPrefix: false},
+	"survey_mi": {group: catgoryDistance, allowPrefix: false},
 	// time
-	"yr":  {group: categoryTime, allowPrefix: false},
-	"day": {group: categoryTime, allowPrefix: false},
-	"d":   {group: categoryTime, allowPrefix: false},
-	"hr":  {group: categoryTime, allowPrefix: false},
-	"mn":  {group: categoryTime, allowPrefix: false},
-	"min": {group: categoryTime, allowPrefix: false},
-	"sec": {group: categoryTime, allowPrefix: true},
-	"s":   {group: categoryTime, allowPrefix: true},
+	"yr":  {group: catgoryTime, allowPrefix: false},
+	"day": {group: catgoryTime, allowPrefix: false},
+	"d":   {group: catgoryTime, allowPrefix: false},
+	"hr":  {group: catgoryTime, allowPrefix: false},
+	"mn":  {group: catgoryTime, allowPrefix: false},
+	"min": {group: catgoryTime, allowPrefix: false},
+	"sec": {group: catgoryTime, allowPrefix: true},
+	"s":   {group: catgoryTime, allowPrefix: true},
 	// pressure
-	"Pa":   {group: categoryPressure, allowPrefix: true},
-	"p":    {group: categoryPressure, allowPrefix: true},
-	"atm":  {group: categoryPressure, allowPrefix: true},
-	"at":   {group: categoryPressure, allowPrefix: true},
-	"mmHg": {group: categoryPressure, allowPrefix: true},
-	"psi":  {group: categoryPressure, allowPrefix: true},
-	"Torr": {group: categoryPressure, allowPrefix: true},
+	"Pa":   {group: catgoryPressure, allowPrefix: true},
+	"p":    {group: catgoryPressure, allowPrefix: true},
+	"atm":  {group: catgoryPressure, allowPrefix: true},
+	"at":   {group: catgoryPressure, allowPrefix: true},
+	"mmHg": {group: catgoryPressure, allowPrefix: true},
+	"psi":  {group: catgoryPressure, allowPrefix: true},
+	"Torr": {group: catgoryPressure, allowPrefix: true},
 	// force
-	"N":    {group: categoryForce, allowPrefix: true},
-	"dyn":  {group: categoryForce, allowPrefix: true},
-	"dy":   {group: categoryForce, allowPrefix: true},
-	"lbf":  {group: categoryForce, allowPrefix: false},
-	"pond": {group: categoryForce, allowPrefix: true},
+	"N":    {group: catgoryForce, allowPrefix: true},
+	"dyn":  {group: catgoryForce, allowPrefix: true},
+	"dy":   {group: catgoryForce, allowPrefix: true},
+	"lbf":  {group: catgoryForce, allowPrefix: false},
+	"pond": {group: catgoryForce, allowPrefix: true},
 	// energy
-	"J":   {group: categoryEnergy, allowPrefix: true},
-	"e":   {group: categoryEnergy, allowPrefix: true},
-	"c":   {group: categoryEnergy, allowPrefix: true},
-	"cal": {group: categoryEnergy, allowPrefix: true},
-	"eV":  {group: categoryEnergy, allowPrefix: true},
-	"ev":  {group: categoryEnergy, allowPrefix: true},
-	"HPh": {group: categoryEnergy, allowPrefix: false},
-	"hh":  {group: categoryEnergy, allowPrefix: false},
-	"Wh":  {group: categoryEnergy, allowPrefix: true},
-	"wh":  {group: categoryEnergy, allowPrefix: true},
-	"flb": {group: categoryEnergy, allowPrefix: false},
-	"BTU": {group: categoryEnergy, allowPrefix: false},
-	"btu": {group: categoryEnergy, allowPrefix: false},
+	"J":   {group: catgoryEnergy, allowPrefix: true},
+	"e":   {group: catgoryEnergy, allowPrefix: true},
+	"c":   {group: catgoryEnergy, allowPrefix: true},
+	"cal": {group: catgoryEnergy, allowPrefix: true},
+	"eV":  {group: catgoryEnergy, allowPrefix: true},
+	"ev":  {group: catgoryEnergy, allowPrefix: true},
+	"HPh": {group: catgoryEnergy, allowPrefix: false},
+	"hh":  {group: catgoryEnergy, allowPrefix: false},
+	"Wh":  {group: catgoryEnergy, allowPrefix: true},
+	"wh":  {group: catgoryEnergy, allowPrefix: true},
+	"flb": {group: catgoryEnergy, allowPrefix: false},
+	"BTU": {group: catgoryEnergy, allowPrefix: false},
+	"btu": {group: catgoryEnergy, allowPrefix: false},
 	// power
-	"HP": {group: categoryPower, allowPrefix: false},
-	"h":  {group: categoryPower, allowPrefix: false},
-	"W":  {group: categoryPower, allowPrefix: true},
-	"w":  {group: categoryPower, allowPrefix: true},
-	"PS": {group: categoryPower, allowPrefix: false},
-	"T":  {group: categoryMagnetism, allowPrefix: true},
-	"ga": {group: categoryMagnetism, allowPrefix: true},
+	"HP": {group: catgoryPower, allowPrefix: false},
+	"h":  {group: catgoryPower, allowPrefix: false},
+	"W":  {group: catgoryPower, allowPrefix: true},
+	"w":  {group: catgoryPower, allowPrefix: true},
+	"PS": {group: catgoryPower, allowPrefix: false},
+	"T":  {group: catgoryMagnetism, allowPrefix: true},
+	"ga": {group: catgoryMagnetism, allowPrefix: true},
 	// temperature
-	"C":    {group: categoryTemperature, allowPrefix: false},
-	"cel":  {group: categoryTemperature, allowPrefix: false},
-	"F":    {group: categoryTemperature, allowPrefix: false},
-	"fah":  {group: categoryTemperature, allowPrefix: false},
-	"K":    {group: categoryTemperature, allowPrefix: false},
-	"kel":  {group: categoryTemperature, allowPrefix: false},
-	"Rank": {group: categoryTemperature, allowPrefix: false},
-	"Reau": {group: categoryTemperature, allowPrefix: false},
+	"C":    {group: catgoryTemperature, allowPrefix: false},
+	"cel":  {group: catgoryTemperature, allowPrefix: false},
+	"F":    {group: catgoryTemperature, allowPrefix: false},
+	"fah":  {group: catgoryTemperature, allowPrefix: false},
+	"K":    {group: catgoryTemperature, allowPrefix: false},
+	"kel":  {group: catgoryTemperature, allowPrefix: false},
+	"Rank": {group: catgoryTemperature, allowPrefix: false},
+	"Reau": {group: catgoryTemperature, allowPrefix: false},
 	// volume
-	"l":        {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"L":        {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"lt":       {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"tsp":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"tspm":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"tbs":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"oz":       {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"cup":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"pt":       {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"us_pt":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"uk_pt":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"qt":       {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"uk_qt":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"gal":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"uk_gal":   {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"ang3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"ang^3":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"barrel":   {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"bushel":   {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"in3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"in^3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"ft3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"ft^3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"ly3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"ly^3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"m3":       {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"m^3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: true},
-	"mi3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"mi^3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"yd3":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"yd^3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Nmi3":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Nmi^3":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Pica3":    {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Pica^3":   {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Picapt3":  {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"Picapt^3": {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"GRT":      {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"regton":   {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
-	"MTON":     {group: categoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"l":        {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"L":        {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"lt":       {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"tsp":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"tspm":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"tbs":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"oz":       {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"cup":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"pt":       {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"us_pt":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"uk_pt":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"qt":       {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"uk_qt":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"gal":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"uk_gal":   {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"ang3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"ang^3":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"barrel":   {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"bushel":   {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"in3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"in^3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"ft3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"ft^3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"ly3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"ly^3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"m3":       {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"m^3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: true},
+	"mi3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"mi^3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"yd3":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"yd^3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Nmi3":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Nmi^3":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Pica3":    {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Pica^3":   {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Picapt3":  {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"Picapt^3": {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"GRT":      {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"regton":   {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
+	"MTON":     {group: catgoryVolumeAndLiquidMeasure, allowPrefix: false},
 	// area
-	"ha":       {group: categoryArea, allowPrefix: true},
-	"uk_acre":  {group: categoryArea, allowPrefix: false},
-	"us_acre":  {group: categoryArea, allowPrefix: false},
-	"ang2":     {group: categoryArea, allowPrefix: true},
-	"ang^2":    {group: categoryArea, allowPrefix: true},
-	"ar":       {group: categoryArea, allowPrefix: true},
-	"ft2":      {group: categoryArea, allowPrefix: false},
-	"ft^2":     {group: categoryArea, allowPrefix: false},
-	"in2":      {group: categoryArea, allowPrefix: false},
-	"in^2":     {group: categoryArea, allowPrefix: false},
-	"ly2":      {group: categoryArea, allowPrefix: false},
-	"ly^2":     {group: categoryArea, allowPrefix: false},
-	"m2":       {group: categoryArea, allowPrefix: true},
-	"m^2":      {group: categoryArea, allowPrefix: true},
-	"Morgen":   {group: categoryArea, allowPrefix: false},
-	"mi2":      {group: categoryArea, allowPrefix: false},
-	"mi^2":     {group: categoryArea, allowPrefix: false},
-	"Nmi2":     {group: categoryArea, allowPrefix: false},
-	"Nmi^2":    {group: categoryArea, allowPrefix: false},
-	"Pica2":    {group: categoryArea, allowPrefix: false},
-	"Pica^2":   {group: categoryArea, allowPrefix: false},
-	"Picapt2":  {group: categoryArea, allowPrefix: false},
-	"Picapt^2": {group: categoryArea, allowPrefix: false},
-	"yd2":      {group: categoryArea, allowPrefix: false},
-	"yd^2":     {group: categoryArea, allowPrefix: false},
+	"ha":       {group: catgoryArea, allowPrefix: true},
+	"uk_acre":  {group: catgoryArea, allowPrefix: false},
+	"us_acre":  {group: catgoryArea, allowPrefix: false},
+	"ang2":     {group: catgoryArea, allowPrefix: true},
+	"ang^2":    {group: catgoryArea, allowPrefix: true},
+	"ar":       {group: catgoryArea, allowPrefix: true},
+	"ft2":      {group: catgoryArea, allowPrefix: false},
+	"ft^2":     {group: catgoryArea, allowPrefix: false},
+	"in2":      {group: catgoryArea, allowPrefix: false},
+	"in^2":     {group: catgoryArea, allowPrefix: false},
+	"ly2":      {group: catgoryArea, allowPrefix: false},
+	"ly^2":     {group: catgoryArea, allowPrefix: false},
+	"m2":       {group: catgoryArea, allowPrefix: true},
+	"m^2":      {group: catgoryArea, allowPrefix: true},
+	"Morgen":   {group: catgoryArea, allowPrefix: false},
+	"mi2":      {group: catgoryArea, allowPrefix: false},
+	"mi^2":     {group: catgoryArea, allowPrefix: false},
+	"Nmi2":     {group: catgoryArea, allowPrefix: false},
+	"Nmi^2":    {group: catgoryArea, allowPrefix: false},
+	"Pica2":    {group: catgoryArea, allowPrefix: false},
+	"Pica^2":   {group: catgoryArea, allowPrefix: false},
+	"Picapt2":  {group: catgoryArea, allowPrefix: false},
+	"Picapt^2": {group: catgoryArea, allowPrefix: false},
+	"yd2":      {group: catgoryArea, allowPrefix: false},
+	"yd^2":     {group: catgoryArea, allowPrefix: false},
 	// information
-	"byte": {group: categoryInformation, allowPrefix: true},
-	"bit":  {group: categoryInformation, allowPrefix: true},
+	"byte": {group: catgoryInformation, allowPrefix: true},
+	"bit":  {group: catgoryInformation, allowPrefix: true},
 	// speed
-	"m/s":   {group: categorySpeed, allowPrefix: true},
-	"m/sec": {group: categorySpeed, allowPrefix: true},
-	"m/h":   {group: categorySpeed, allowPrefix: true},
-	"m/hr":  {group: categorySpeed, allowPrefix: true},
-	"mph":   {group: categorySpeed, allowPrefix: false},
-	"admkn": {group: categorySpeed, allowPrefix: false},
-	"kn":    {group: categorySpeed, allowPrefix: false},
+	"m/s":   {group: catgorySpeed, allowPrefix: true},
+	"m/sec": {group: catgorySpeed, allowPrefix: true},
+	"m/h":   {group: catgorySpeed, allowPrefix: true},
+	"m/hr":  {group: catgorySpeed, allowPrefix: true},
+	"mph":   {group: catgorySpeed, allowPrefix: false},
+	"admkn": {group: catgorySpeed, allowPrefix: false},
+	"kn":    {group: catgorySpeed, allowPrefix: false},
 }
 
 // unitConversions maps details of the Units of measure conversion factors,
 // organised by group.
 var unitConversions = map[byte]map[string]float64{
 	// conversion uses gram (g) as an intermediate unit
-	categoryWeightAndMass: {
+	catgoryWeightAndMass: {
 		"g":        1,
 		"sg":       6.85217658567918e-05,
 		"lbm":      2.20462262184878e-03,
@@ -2333,7 +2329,7 @@ var unitConversions = map[byte]map[string]float64{
 		"brton":    9.84206527611061e-07,
 	},
 	// conversion uses meter (m) as an intermediate unit
-	categoryDistance: {
+	catgoryDistance: {
 		"m":         1,
 		"mi":        6.21371192237334e-04,
 		"Nmi":       5.39956803455724e-04,
@@ -2351,7 +2347,7 @@ var unitConversions = map[byte]map[string]float64{
 		"survey_mi": 6.21369949494950e-04,
 	},
 	// conversion uses second (s) as an intermediate unit
-	categoryTime: {
+	catgoryTime: {
 		"yr":  3.16880878140289e-08,
 		"day": 1.15740740740741e-05,
 		"d":   1.15740740740741e-05,
@@ -2362,7 +2358,7 @@ var unitConversions = map[byte]map[string]float64{
 		"s":   1,
 	},
 	// conversion uses Pascal (Pa) as an intermediate unit
-	categoryPressure: {
+	catgoryPressure: {
 		"Pa":   1,
 		"p":    1,
 		"atm":  9.86923266716013e-06,
@@ -2372,7 +2368,7 @@ var unitConversions = map[byte]map[string]float64{
 		"Torr": 7.50061682704170e-03,
 	},
 	// conversion uses Newton (N) as an intermediate unit
-	categoryForce: {
+	catgoryForce: {
 		"N":    1,
 		"dyn":  1.0e+5,
 		"dy":   1.0e+5,
@@ -2380,7 +2376,7 @@ var unitConversions = map[byte]map[string]float64{
 		"pond": 1.01971621297793e+02,
 	},
 	// conversion uses Joule (J) as an intermediate unit
-	categoryEnergy: {
+	catgoryEnergy: {
 		"J":   1,
 		"e":   9.99999519343231e+06,
 		"c":   2.39006249473467e-01,
@@ -2396,7 +2392,7 @@ var unitConversions = map[byte]map[string]float64{
 		"btu": 9.47815067349015e-04,
 	},
 	// conversion uses Horsepower (HP) as an intermediate unit
-	categoryPower: {
+	catgoryPower: {
 		"HP": 1,
 		"h":  1,
 		"W":  7.45699871582270e+02,
@@ -2404,12 +2400,12 @@ var unitConversions = map[byte]map[string]float64{
 		"PS": 1.01386966542400e+00,
 	},
 	// conversion uses Tesla (T) as an intermediate unit
-	categoryMagnetism: {
+	catgoryMagnetism: {
 		"T":  1,
 		"ga": 10000,
 	},
 	// conversion uses litre (l) as an intermediate unit
-	categoryVolumeAndLiquidMeasure: {
+	catgoryVolumeAndLiquidMeasure: {
 		"l":        1,
 		"L":        1,
 		"lt":       1,
@@ -2452,7 +2448,7 @@ var unitConversions = map[byte]map[string]float64{
 		"MTON":     8.82866668037215e-04,
 	},
 	// conversion uses hectare (ha) as an intermediate unit
-	categoryArea: {
+	catgoryArea: {
 		"ha":       1,
 		"uk_acre":  2.47105381467165e+00,
 		"us_acre":  2.47104393046628e+00,
@@ -2480,12 +2476,12 @@ var unitConversions = map[byte]map[string]float64{
 		"yd^2":     1.19599004630108e+04,
 	},
 	// conversion uses bit (bit) as an intermediate unit
-	categoryInformation: {
+	catgoryInformation: {
 		"bit":  1,
 		"byte": 0.125,
 	},
 	// conversion uses Meters per Second (m/s) as an intermediate unit
-	categorySpeed: {
+	catgorySpeed: {
 		"m/s":   1,
 		"m/sec": 1,
 		"m/h":   3.60e+03,
@@ -2639,7 +2635,7 @@ func (fn *formulaFuncs) CONVERT(argsList *list.List) formulaArg {
 		return newNumberFormulaArg(val / fromMultiplier)
 	} else if fromUOM == toUOM {
 		return newNumberFormulaArg(val / toMultiplier)
-	} else if fromCategory == categoryTemperature {
+	} else if fromCategory == catgoryTemperature {
 		return newNumberFormulaArg(convertTemperature(fromUOM, toUOM, val))
 	}
 	fromConversion := unitConversions[fromCategory][fromUOM]
@@ -3557,56 +3553,6 @@ func (fn *formulaFuncs) ACOTH(argsList *list.List) formulaArg {
 		return arg
 	}
 	return newNumberFormulaArg(math.Atanh(1 / arg.Number))
-}
-
-// AGGREGATE function returns the result of a specified operation or function,
-// applied to a list or database of values. The syntax of the function is:
-//
-//	AGGREGATE(function_num,options,ref1,[ref2],...)
-func (fn *formulaFuncs) AGGREGATE(argsList *list.List) formulaArg {
-	if argsList.Len() < 2 {
-		return newErrorFormulaArg(formulaErrorVALUE, "AGGREGATE requires at least 3 arguments")
-	}
-	var fnNum, opts formulaArg
-	if fnNum = argsList.Front().Value.(formulaArg).ToNumber(); fnNum.Type != ArgNumber {
-		return fnNum
-	}
-	subFn, ok := map[int]func(argsList *list.List) formulaArg{
-		1:  fn.AVERAGE,
-		2:  fn.COUNT,
-		3:  fn.COUNTA,
-		4:  fn.MAX,
-		5:  fn.MIN,
-		6:  fn.PRODUCT,
-		7:  fn.STDEVdotS,
-		8:  fn.STDEVdotP,
-		9:  fn.SUM,
-		10: fn.VARdotS,
-		11: fn.VARdotP,
-		12: fn.MEDIAN,
-		13: fn.MODEdotSNGL,
-		14: fn.LARGE,
-		15: fn.SMALL,
-		16: fn.PERCENTILEdotINC,
-		17: fn.QUARTILEdotINC,
-		18: fn.PERCENTILEdotEXC,
-		19: fn.QUARTILEdotEXC,
-	}[int(fnNum.Number)]
-	if !ok {
-		return newErrorFormulaArg(formulaErrorVALUE, "AGGREGATE has invalid function_num")
-	}
-	if opts = argsList.Front().Next().Value.(formulaArg).ToNumber(); opts.Type != ArgNumber {
-		return opts
-	}
-	// TODO: apply option argument values to be ignored during the calculation
-	if int(opts.Number) < 0 || int(opts.Number) > 7 {
-		return newErrorFormulaArg(formulaErrorVALUE, "AGGREGATE has invalid options")
-	}
-	subArgList := list.New().Init()
-	for arg := argsList.Front().Next().Next(); arg != nil; arg = arg.Next() {
-		subArgList.PushBack(arg.Value.(formulaArg))
-	}
-	return subFn(subArgList)
 }
 
 // ARABIC function converts a Roman numeral into an Arabic numeral. The syntax
@@ -5605,41 +5551,6 @@ func (fn *formulaFuncs) POISSON(argsList *list.List) formulaArg {
 	return newNumberFormulaArg(math.Exp(0-mean.Number) * math.Pow(mean.Number, x.Number) / fact(x.Number))
 }
 
-// SUBTOTAL function performs a specified calculation (e.g. the sum, product,
-// average, etc.) for a supplied set of values. The syntax of the function is:
-//
-//	SUBTOTAL(function_num,ref1,[ref2],...)
-func (fn *formulaFuncs) SUBTOTAL(argsList *list.List) formulaArg {
-	if argsList.Len() < 2 {
-		return newErrorFormulaArg(formulaErrorVALUE, "SUBTOTAL requires at least 2 arguments")
-	}
-	var fnNum formulaArg
-	if fnNum = argsList.Front().Value.(formulaArg).ToNumber(); fnNum.Type != ArgNumber {
-		return fnNum
-	}
-	subFn, ok := map[int]func(argsList *list.List) formulaArg{
-		1: fn.AVERAGE, 101: fn.AVERAGE,
-		2: fn.COUNT, 102: fn.COUNT,
-		3: fn.COUNTA, 103: fn.COUNTA,
-		4: fn.MAX, 104: fn.MAX,
-		5: fn.MIN, 105: fn.MIN,
-		6: fn.PRODUCT, 106: fn.PRODUCT,
-		7: fn.STDEV, 107: fn.STDEV,
-		8: fn.STDEVP, 108: fn.STDEVP,
-		9: fn.SUM, 109: fn.SUM,
-		10: fn.VAR, 110: fn.VAR,
-		11: fn.VARP, 111: fn.VARP,
-	}[int(fnNum.Number)]
-	if !ok {
-		return newErrorFormulaArg(formulaErrorVALUE, "SUBTOTAL has invalid function_num")
-	}
-	subArgList := list.New().Init()
-	for arg := argsList.Front().Next(); arg != nil; arg = arg.Next() {
-		subArgList.PushBack(arg.Value.(formulaArg))
-	}
-	return subFn(subArgList)
-}
-
 // SUM function adds together a supplied set of numbers and returns the sum of
 // these values. The syntax of the function is:
 //
@@ -6126,7 +6037,7 @@ func getBetaHelperContFrac(fX, fA, fB float64) float64 {
 			bfinished = math.Abs(cf-cfnew) < math.Abs(cf)*fMachEps
 		}
 		cf = cfnew
-		rm++
+		rm += 1
 	}
 	return cf
 }
@@ -7003,7 +6914,7 @@ func (fn *formulaFuncs) CHIDIST(argsList *list.List) formulaArg {
 			for z <= x1 {
 				e = math.Log(z) + e
 				s += math.Exp(c*z - a - e)
-				z++
+				z += 1
 			}
 			return newNumberFormulaArg(s)
 		}
@@ -7015,7 +6926,7 @@ func (fn *formulaFuncs) CHIDIST(argsList *list.List) formulaArg {
 		for z <= x1 {
 			e = e * (a / z)
 			c = c + e
-			z++
+			z += 1
 		}
 		return newNumberFormulaArg(c*y + s)
 	}
@@ -11460,20 +11371,19 @@ func (fn *formulaFuncs) SHEET(argsList *list.List) formulaArg {
 		return newErrorFormulaArg(formulaErrorVALUE, "SHEET accepts at most 1 argument")
 	}
 	if argsList.Len() == 0 {
-		idx, _ := fn.f.GetSheetIndex(fn.sheet)
-		return newNumberFormulaArg(float64(idx + 1))
+		return newNumberFormulaArg(float64(fn.f.GetSheetIndex(fn.sheet) + 1))
 	}
 	arg := argsList.Front().Value.(formulaArg)
-	if sheetIdx, _ := fn.f.GetSheetIndex(arg.Value()); sheetIdx != -1 {
+	if sheetIdx := fn.f.GetSheetIndex(arg.Value()); sheetIdx != -1 {
 		return newNumberFormulaArg(float64(sheetIdx + 1))
 	}
 	if arg.cellRanges != nil && arg.cellRanges.Len() > 0 {
-		if sheetIdx, _ := fn.f.GetSheetIndex(arg.cellRanges.Front().Value.(cellRange).From.Sheet); sheetIdx != -1 {
+		if sheetIdx := fn.f.GetSheetIndex(arg.cellRanges.Front().Value.(cellRange).From.Sheet); sheetIdx != -1 {
 			return newNumberFormulaArg(float64(sheetIdx + 1))
 		}
 	}
 	if arg.cellRefs != nil && arg.cellRefs.Len() > 0 {
-		if sheetIdx, _ := fn.f.GetSheetIndex(arg.cellRefs.Front().Value.(cellRef).Sheet); sheetIdx != -1 {
+		if sheetIdx := fn.f.GetSheetIndex(arg.cellRefs.Front().Value.(cellRef).Sheet); sheetIdx != -1 {
 			return newNumberFormulaArg(float64(sheetIdx + 1))
 		}
 	}
@@ -11708,9 +11618,7 @@ func (fn *formulaFuncs) OR(argsList *list.List) formulaArg {
 			}
 			return newErrorFormulaArg(formulaErrorVALUE, formulaErrorVALUE)
 		case ArgNumber:
-			if or = token.Number != 0; or {
-				return newStringFormulaArg(strings.ToUpper(strconv.FormatBool(or)))
-			}
+			or = token.Number != 0
 		case ArgMatrix:
 			// TODO
 			return newErrorFormulaArg(formulaErrorVALUE, formulaErrorVALUE)
@@ -13608,7 +13516,7 @@ func (fn *formulaFuncs) replace(name string, argsList *list.List) formulaArg {
 	if argsList.Len() != 4 {
 		return newErrorFormulaArg(formulaErrorVALUE, fmt.Sprintf("%s requires 4 arguments", name))
 	}
-	sourceText, targetText := argsList.Front().Value.(formulaArg).Value(), argsList.Back().Value.(formulaArg).Value()
+	oldText, newText := argsList.Front().Value.(formulaArg).Value(), argsList.Back().Value.(formulaArg).Value()
 	startNumArg, numCharsArg := argsList.Front().Next().Value.(formulaArg).ToNumber(), argsList.Front().Next().Next().Value.(formulaArg).ToNumber()
 	if startNumArg.Type != ArgNumber {
 		return startNumArg
@@ -13616,18 +13524,18 @@ func (fn *formulaFuncs) replace(name string, argsList *list.List) formulaArg {
 	if numCharsArg.Type != ArgNumber {
 		return numCharsArg
 	}
-	sourceTextLen, startIdx := len(sourceText), int(startNumArg.Number)
-	if startIdx > sourceTextLen {
-		startIdx = sourceTextLen + 1
+	oldTextLen, startIdx := len(oldText), int(startNumArg.Number)
+	if startIdx > oldTextLen {
+		startIdx = oldTextLen + 1
 	}
 	endIdx := startIdx + int(numCharsArg.Number)
-	if endIdx > sourceTextLen {
-		endIdx = sourceTextLen + 1
+	if endIdx > oldTextLen {
+		endIdx = oldTextLen + 1
 	}
 	if startIdx < 1 || endIdx < 1 {
 		return newErrorFormulaArg(formulaErrorVALUE, formulaErrorVALUE)
 	}
-	result := sourceText[:startIdx-1] + targetText + sourceText[endIdx-1:]
+	result := oldText[:startIdx-1] + newText + oldText[endIdx-1:]
 	return newStringFormulaArg(result)
 }
 
@@ -13684,10 +13592,10 @@ func (fn *formulaFuncs) SUBSTITUTE(argsList *list.List) formulaArg {
 	if argsList.Len() != 3 && argsList.Len() != 4 {
 		return newErrorFormulaArg(formulaErrorVALUE, "SUBSTITUTE requires 3 or 4 arguments")
 	}
-	text, sourceText := argsList.Front().Value.(formulaArg), argsList.Front().Next().Value.(formulaArg)
-	targetText, instanceNum := argsList.Front().Next().Next().Value.(formulaArg), 0
+	text, oldText := argsList.Front().Value.(formulaArg), argsList.Front().Next().Value.(formulaArg)
+	newText, instanceNum := argsList.Front().Next().Next().Value.(formulaArg), 0
 	if argsList.Len() == 3 {
-		return newStringFormulaArg(strings.ReplaceAll(text.Value(), sourceText.Value(), targetText.Value()))
+		return newStringFormulaArg(strings.ReplaceAll(text.Value(), oldText.Value(), newText.Value()))
 	}
 	instanceNumArg := argsList.Back().Value.(formulaArg).ToNumber()
 	if instanceNumArg.Type != ArgNumber {
@@ -13697,10 +13605,10 @@ func (fn *formulaFuncs) SUBSTITUTE(argsList *list.List) formulaArg {
 	if instanceNum < 1 {
 		return newErrorFormulaArg(formulaErrorVALUE, "instance_num should be > 0")
 	}
-	str, sourceTextLen, count, chars, pos := text.Value(), len(sourceText.Value()), instanceNum, 0, -1
+	str, oldTextLen, count, chars, pos := text.Value(), len(oldText.Value()), instanceNum, 0, -1
 	for {
 		count--
-		index := strings.Index(str, sourceText.Value())
+		index := strings.Index(str, oldText.Value())
 		if index == -1 {
 			pos = -1
 			break
@@ -13709,7 +13617,7 @@ func (fn *formulaFuncs) SUBSTITUTE(argsList *list.List) formulaArg {
 			if count == 0 {
 				break
 			}
-			idx := sourceTextLen + index
+			idx := oldTextLen + index
 			chars += idx
 			str = str[idx:]
 		}
@@ -13717,8 +13625,8 @@ func (fn *formulaFuncs) SUBSTITUTE(argsList *list.List) formulaArg {
 	if pos == -1 {
 		return newStringFormulaArg(text.Value())
 	}
-	pre, post := text.Value()[:pos], text.Value()[pos+sourceTextLen:]
-	return newStringFormulaArg(pre + targetText.Value() + post)
+	pre, post := text.Value()[:pos], text.Value()[pos+oldTextLen:]
+	return newStringFormulaArg(pre + newText.Value() + post)
 }
 
 // TEXTJOIN function joins together a series of supplied text strings into one
@@ -13961,10 +13869,13 @@ func (fn *formulaFuncs) ADDRESS(argsList *list.List) formulaArg {
 	}
 	var sheetText string
 	if argsList.Len() == 5 {
-		sheetText = fmt.Sprintf("%s!", argsList.Back().Value.(formulaArg).Value())
+		sheetText = trimSheetName(argsList.Back().Value.(formulaArg).Value())
+	}
+	if len(sheetText) > 0 {
+		sheetText = fmt.Sprintf("%s!", sheetText)
 	}
 	formatter := addressFmtMaps[fmt.Sprintf("%d_%s", int(absNum.Number), a1.Value())]
-	addr, err := formatter(int(colNum.Number), int(rowNum.Number))
+	addr, err := formatter(int(colNum.Number), int(colNum.Number))
 	if err != nil {
 		return newErrorFormulaArg(formulaErrorVALUE, formulaErrorVALUE)
 	}
@@ -15375,10 +15286,10 @@ func (fn *formulaFuncs) coupons(name string, arg formulaArg) formulaArg {
 		month -= coupon
 	}
 	if month > 11 {
-		year++
+		year += 1
 		month -= 12
 	} else if month < 0 {
-		year--
+		year -= 1
 		month += 12
 	}
 	day, lastDay := maturity.Day(), time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)

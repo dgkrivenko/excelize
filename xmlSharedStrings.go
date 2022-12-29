@@ -46,9 +46,8 @@ type xlsxSI struct {
 // properties are defined in the rPr element, and the text displayed to the
 // user is defined in the Text (t) element.
 type xlsxR struct {
-	XMLName xml.Name `xml:"r"`
-	RPr     *xlsxRPr `xml:"rPr"`
-	T       *xlsxT   `xml:"t"`
+	RPr *xlsxRPr `xml:"rPr"`
+	T   *xlsxT   `xml:"t"`
 }
 
 // xlsxT directly maps the t element in the run properties.
@@ -83,6 +82,6 @@ type xlsxRPr struct {
 
 // RichTextRun directly maps the settings of the rich text run.
 type RichTextRun struct {
-	Font *Font  `json:"font"`
-	Text string `json:"text"`
+	Font *Font
+	Text string
 }

@@ -21,9 +21,7 @@ const (
 	defaultXMLPathCalcChain     = "xl/calcChain.xml"
 	defaultXMLPathSharedStrings = "xl/sharedStrings.xml"
 	defaultXMLPathStyles        = "xl/styles.xml"
-	defaultXMLPathTheme         = "xl/theme/theme1.xml"
 	defaultXMLPathWorkbook      = "xl/workbook.xml"
-	defaultXMLPathWorkbookRels  = "xl/_rels/workbook.xml.rels"
 	defaultTempFileSST          = "sharedStrings"
 )
 

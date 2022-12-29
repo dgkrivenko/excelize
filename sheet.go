@@ -17,6 +17,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,19 +37,15 @@ import (
 // name and returns the index of the sheets in the workbook after it appended.
 // Note that when creating a new workbook, the default worksheet named
 // `Sheet1` will be created.
-func (f *File) NewSheet(sheet string) (int, error) {
-	var err error
-	if err = checkSheetName(sheet); err != nil {
-		return -1, err
-	}
+func (f *File) NewSheet(sheet string) int {
 	// Check if the worksheet already exists
-	index, err := f.GetSheetIndex(sheet)
+	index := f.GetSheetIndex(sheet)
 	if index != -1 {
-		return index, err
+		return index
 	}
 	f.DeleteSheet(sheet)
 	f.SheetCount++
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	sheetID := 0
 	for _, v := range wb.Sheets.Sheet {
 		if v.SheetID > sheetID {
@@ -56,7 +54,7 @@ func (f *File) NewSheet(sheet string) (int, error) {
 	}
 	sheetID++
 	// Update [Content_Types].xml
-	_ = f.setContentTypes("/xl/worksheets/sheet"+strconv.Itoa(sheetID)+".xml", ContentTypeSpreadSheetMLWorksheet)
+	f.setContentTypes("/xl/worksheets/sheet"+strconv.Itoa(sheetID)+".xml", ContentTypeSpreadSheetMLWorksheet)
 	// Create new sheet /xl/worksheets/sheet%d.xml
 	f.setSheet(sheetID, sheet)
 	// Update workbook.xml.rels
@@ -68,17 +66,19 @@ func (f *File) NewSheet(sheet string) (int, error) {
 
 // contentTypesReader provides a function to get the pointer to the
 // [Content_Types].xml structure after deserialization.
-func (f *File) contentTypesReader() (*xlsxTypes, error) {
+func (f *File) contentTypesReader() *xlsxTypes {
+	var err error
+
 	if f.ContentTypes == nil {
 		f.ContentTypes = new(xlsxTypes)
 		f.ContentTypes.Lock()
 		defer f.ContentTypes.Unlock()
-		if err := f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(defaultXMLPathContentTypes)))).
+		if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(defaultXMLPathContentTypes)))).
 			Decode(f.ContentTypes); err != nil && err != io.EOF {
-			return f.ContentTypes, err
+			log.Printf("xml decode error: %s", err)
 		}
 	}
-	return f.ContentTypes, nil
+	return f.ContentTypes
 }
 
 // contentTypesWriter provides a function to save [Content_Types].xml after
@@ -137,11 +137,9 @@ func (f *File) mergeExpandedCols(ws *xlsxWorksheet) {
 // workSheetWriter provides a function to save xl/worksheets/sheet%d.xml after
 // serialize structure.
 func (f *File) workSheetWriter() {
-	var (
-		arr     []byte
-		buffer  = bytes.NewBuffer(arr)
-		encoder = xml.NewEncoder(buffer)
-	)
+	var arr []byte
+	buffer := bytes.NewBuffer(arr)
+	encoder := xml.NewEncoder(buffer)
 	f.Sheet.Range(func(p, ws interface{}) bool {
 		if ws != nil {
 			sheet := ws.(*xlsxWorksheet)
@@ -151,7 +149,9 @@ func (f *File) workSheetWriter() {
 			if sheet.Cols != nil && len(sheet.Cols.Col) > 0 {
 				f.mergeExpandedCols(sheet)
 			}
-			sheet.SheetData.Row = trimRow(&sheet.SheetData)
+			for k, v := range sheet.SheetData.Row {
+				sheet.SheetData.Row[k].C = trimCell(v.C)
+			}
 			if sheet.SheetPr != nil || sheet.Drawing != nil || sheet.Hyperlinks != nil || sheet.Picture != nil || sheet.TableParts != nil {
 				f.addNameSpaces(p.(string), SourceRelationship)
 			}
@@ -176,21 +176,6 @@ func (f *File) workSheetWriter() {
 	})
 }
 
-// trimRow provides a function to trim empty rows.
-func trimRow(sheetData *xlsxSheetData) []xlsxRow {
-	var (
-		row  xlsxRow
-		rows []xlsxRow
-	)
-	for k, v := range sheetData.Row {
-		row = sheetData.Row[k]
-		if row.C = trimCell(v.C); len(row.C) != 0 || row.hasAttr() {
-			rows = append(rows, row)
-		}
-	}
-	return rows
-}
-
 // trimCell provides a function to trim blank cells which created by fillColumns.
 func trimCell(column []xlsxC) []xlsxC {
 	rowFull := true
@@ -213,18 +198,14 @@ func trimCell(column []xlsxC) []xlsxC {
 
 // setContentTypes provides a function to read and update property of contents
 // type of the spreadsheet.
-func (f *File) setContentTypes(partName, contentType string) error {
-	content, err := f.contentTypesReader()
-	if err != nil {
-		return err
-	}
+func (f *File) setContentTypes(partName, contentType string) {
+	content := f.contentTypesReader()
 	content.Lock()
 	defer content.Unlock()
 	content.Overrides = append(content.Overrides, xlsxOverride{
 		PartName:    partName,
 		ContentType: contentType,
 	})
-	return err
 }
 
 // setSheet provides a function to update sheet property by given index.
@@ -236,7 +217,7 @@ func (f *File) setSheet(index int, name string) {
 		},
 	}
 	sheetXMLPath := "xl/worksheets/sheet" + strconv.Itoa(index) + ".xml"
-	f.sheetMap[name] = sheetXMLPath
+	f.sheetMap[trimSheetName(name)] = sheetXMLPath
 	f.Sheet.Store(sheetXMLPath, &ws)
 	f.xmlAttr[sheetXMLPath] = []xml.Attr{NameSpaceSpreadSheet}
 }
@@ -260,9 +241,9 @@ func (f *File) relsWriter() {
 // strict requirements about the structure of the input XML. This function is
 // a horrible hack to fix that after the XML marshalling is completed.
 func replaceRelationshipsBytes(content []byte) []byte {
-	sourceXmlns := []byte(`xmlns:relationships="http://schemas.openxmlformats.org/officeDocument/2006/relationships" relationships`)
-	targetXmlns := []byte("r")
-	return bytesReplace(content, sourceXmlns, targetXmlns, -1)
+	oldXmlns := []byte(`xmlns:relationships="http://schemas.openxmlformats.org/officeDocument/2006/relationships" relationships`)
+	newXmlns := []byte("r")
+	return bytesReplace(content, oldXmlns, newXmlns, -1)
 }
 
 // SetActiveSheet provides a function to set the default active sheet of the
@@ -273,7 +254,7 @@ func (f *File) SetActiveSheet(index int) {
 	if index < 0 {
 		index = 0
 	}
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	for activeTab := range wb.Sheets.Sheet {
 		if activeTab == index {
 			if wb.BookViews == nil {
@@ -318,7 +299,7 @@ func (f *File) SetActiveSheet(index int) {
 // spreadsheet. If not found the active sheet will be return integer 0.
 func (f *File) GetActiveSheetIndex() (index int) {
 	sheetID := f.getActiveSheetID()
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	if wb != nil {
 		for idx, sheet := range wb.Sheets.Sheet {
 			if sheet.SheetID == sheetID {
@@ -333,7 +314,7 @@ func (f *File) GetActiveSheetIndex() (index int) {
 // getActiveSheetID provides a function to get active sheet ID of the
 // spreadsheet. If not found the active sheet will be return integer 0.
 func (f *File) getActiveSheetID() int {
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	if wb != nil {
 		if wb.BookViews != nil && len(wb.BookViews.WorkBookView) > 0 {
 			activeTab := wb.BookViews.WorkBookView[0].ActiveTab
@@ -348,31 +329,25 @@ func (f *File) getActiveSheetID() int {
 	return 0
 }
 
-// SetSheetName provides a function to set the worksheet name by given source and
-// target worksheet names. Maximum 31 characters are allowed in sheet title and
+// SetSheetName provides a function to set the worksheet name by given old and
+// new worksheet names. Maximum 31 characters are allowed in sheet title and
 // this function only changes the name of the sheet and will not update the
 // sheet name in the formula or reference associated with the cell. So there
 // may be problem formula error or reference missing.
-func (f *File) SetSheetName(source, target string) error {
-	var err error
-	if err = checkSheetName(source); err != nil {
-		return err
+func (f *File) SetSheetName(oldName, newName string) {
+	oldName = trimSheetName(oldName)
+	newName = trimSheetName(newName)
+	if strings.EqualFold(newName, oldName) {
+		return
 	}
-	if err = checkSheetName(target); err != nil {
-		return err
-	}
-	if strings.EqualFold(target, source) {
-		return err
-	}
-	wb, _ := f.workbookReader()
-	for k, v := range wb.Sheets.Sheet {
-		if v.Name == source {
-			wb.Sheets.Sheet[k].Name = target
-			f.sheetMap[target] = f.sheetMap[source]
-			delete(f.sheetMap, source)
+	content := f.workbookReader()
+	for k, v := range content.Sheets.Sheet {
+		if v.Name == oldName {
+			content.Sheets.Sheet[k].Name = newName
+			f.sheetMap[newName] = f.sheetMap[oldName]
+			delete(f.sheetMap, oldName)
 		}
 	}
-	return err
 }
 
 // GetSheetName provides a function to get the sheet name of the workbook by
@@ -392,8 +367,9 @@ func (f *File) GetSheetName(index int) (name string) {
 // given sheet name. If given worksheet name is invalid, will return an
 // integer type value -1.
 func (f *File) getSheetID(sheet string) int {
+	sheetName := trimSheetName(sheet)
 	for sheetID, name := range f.GetSheetMap() {
-		if strings.EqualFold(name, sheet) {
+		if strings.EqualFold(name, sheetName) {
 			return sheetID
 		}
 	}
@@ -403,16 +379,14 @@ func (f *File) getSheetID(sheet string) int {
 // GetSheetIndex provides a function to get a sheet index of the workbook by
 // the given sheet name. If the given sheet name is invalid or sheet doesn't
 // exist, it will return an integer type value -1.
-func (f *File) GetSheetIndex(sheet string) (int, error) {
-	if err := checkSheetName(sheet); err != nil {
-		return -1, err
-	}
+func (f *File) GetSheetIndex(sheet string) int {
+	sheetName := trimSheetName(sheet)
 	for index, name := range f.GetSheetList() {
-		if strings.EqualFold(name, sheet) {
-			return index, nil
+		if strings.EqualFold(name, sheetName) {
+			return index
 		}
 	}
-	return -1, nil
+	return -1
 }
 
 // GetSheetMap provides a function to get worksheets, chart sheets, dialog
@@ -431,7 +405,7 @@ func (f *File) GetSheetIndex(sheet string) (int, error) {
 //	    fmt.Println(index, name)
 //	}
 func (f *File) GetSheetMap() map[int]string {
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	sheetMap := map[int]string{}
 	if wb != nil {
 		for _, sheet := range wb.Sheets.Sheet {
@@ -444,7 +418,7 @@ func (f *File) GetSheetMap() map[int]string {
 // GetSheetList provides a function to get worksheets, chart sheets, and
 // dialog sheets name list of the workbook.
 func (f *File) GetSheetList() (list []string) {
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	if wb != nil {
 		for _, sheet := range wb.Sheets.Sheet {
 			list = append(list, sheet.Name)
@@ -457,10 +431,8 @@ func (f *File) GetSheetList() (list []string) {
 // of the spreadsheet.
 func (f *File) getSheetMap() map[string]string {
 	maps := map[string]string{}
-	wb, _ := f.workbookReader()
-	rels, _ := f.relsReader(f.getWorkbookRelsPath())
-	for _, v := range wb.Sheets.Sheet {
-		for _, rel := range rels.Relationships {
+	for _, v := range f.workbookReader().Sheets.Sheet {
+		for _, rel := range f.relsReader(f.getWorkbookRelsPath()).Relationships {
 			if rel.ID == v.ID {
 				sheetXMLPath := f.getWorksheetPath(rel.Target)
 				if _, ok := f.Pkg.Load(sheetXMLPath); ok {
@@ -492,44 +464,26 @@ func (f *File) getSheetXMLPath(sheet string) (string, bool) {
 }
 
 // SetSheetBackground provides a function to set background picture by given
-// worksheet name and file path. Supported image types: EMF, EMZ, GIF, JPEG,
-// JPG, PNG, SVG, TIF, TIFF, WMF, and WMZ.
+// worksheet name and file path.
 func (f *File) SetSheetBackground(sheet, picture string) error {
 	var err error
 	// Check picture exists first.
 	if _, err = os.Stat(picture); os.IsNotExist(err) {
 		return err
 	}
-	file, _ := os.ReadFile(filepath.Clean(picture))
-	return f.setSheetBackground(sheet, path.Ext(picture), file)
-}
-
-// SetSheetBackgroundFromBytes provides a function to set background picture by
-// given worksheet name, extension name and image data. Supported image types:
-// EMF, EMZ, GIF, JPEG, JPG, PNG, SVG, TIF, TIFF, WMF, and WMZ.
-func (f *File) SetSheetBackgroundFromBytes(sheet, extension string, picture []byte) error {
-	if len(picture) == 0 {
-		return ErrParameterInvalid
-	}
-	return f.setSheetBackground(sheet, extension, picture)
-}
-
-// setSheetBackground provides a function to set background picture by given
-// worksheet name, file name extension and image data.
-func (f *File) setSheetBackground(sheet, extension string, file []byte) error {
-	imageType, ok := supportedImageTypes[extension]
+	ext, ok := supportedImageTypes[path.Ext(picture)]
 	if !ok {
 		return ErrImgExt
 	}
-	name := f.addMedia(file, imageType)
+	file, _ := ioutil.ReadFile(filepath.Clean(picture))
+	name := f.addMedia(file, ext)
 	sheetXMLPath, _ := f.getSheetXMLPath(sheet)
 	sheetRels := "xl/worksheets/_rels/" + strings.TrimPrefix(sheetXMLPath, "xl/worksheets/") + ".rels"
 	rID := f.addRels(sheetRels, SourceRelationshipImage, strings.Replace(name, "xl", "..", 1), "")
-	if err := f.addSheetPicture(sheet, rID); err != nil {
-		return err
-	}
+	f.addSheetPicture(sheet, rID)
 	f.addSheetNameSpace(sheet, SourceRelationship)
-	return f.setContentTypePartImageExtensions()
+	f.setContentTypePartImageExtensions()
+	return err
 }
 
 // DeleteSheet provides a function to delete worksheet in a workbook by given
@@ -537,22 +491,19 @@ func (f *File) setSheetBackground(sheet, extension string, file []byte) error {
 // references such as formulas, charts, and so on. If there is any referenced
 // value of the deleted worksheet, it will cause a file error when you open
 // it. This function will be invalid when only one worksheet is left.
-func (f *File) DeleteSheet(sheet string) error {
-	if err := checkSheetName(sheet); err != nil {
-		return err
+func (f *File) DeleteSheet(sheet string) {
+	if f.SheetCount == 1 || f.GetSheetIndex(sheet) == -1 {
+		return
 	}
-	if idx, _ := f.GetSheetIndex(sheet); f.SheetCount == 1 || idx == -1 {
-		return nil
-	}
-
-	wb, _ := f.workbookReader()
-	wbRels, _ := f.relsReader(f.getWorkbookRelsPath())
+	sheetName := trimSheetName(sheet)
+	wb := f.workbookReader()
+	wbRels := f.relsReader(f.getWorkbookRelsPath())
 	activeSheetName := f.GetSheetName(f.GetActiveSheetIndex())
-	deleteLocalSheetID, _ := f.GetSheetIndex(sheet)
+	deleteLocalSheetID := f.GetSheetIndex(sheet)
 	deleteAndAdjustDefinedNames(wb, deleteLocalSheetID)
 
 	for idx, v := range wb.Sheets.Sheet {
-		if !strings.EqualFold(v.Name, sheet) {
+		if !strings.EqualFold(v.Name, sheetName) {
 			continue
 		}
 
@@ -568,8 +519,8 @@ func (f *File) DeleteSheet(sheet string) error {
 			}
 		}
 		target := f.deleteSheetFromWorkbookRels(v.ID)
-		_ = f.deleteSheetFromContentTypes(target)
-		_ = f.deleteCalcChain(f.getSheetID(sheet), "")
+		f.deleteSheetFromContentTypes(target)
+		f.deleteCalcChain(f.getSheetID(sheet), "")
 		delete(f.sheetMap, v.Name)
 		f.Pkg.Delete(sheetXML)
 		f.Pkg.Delete(rels)
@@ -578,9 +529,7 @@ func (f *File) DeleteSheet(sheet string) error {
 		delete(f.xmlAttr, sheetXML)
 		f.SheetCount--
 	}
-	index, err := f.GetSheetIndex(activeSheetName)
-	f.SetActiveSheet(index)
-	return err
+	f.SetActiveSheet(f.GetSheetIndex(activeSheetName))
 }
 
 // deleteAndAdjustDefinedNames delete and adjust defined name in the workbook
@@ -606,12 +555,12 @@ func deleteAndAdjustDefinedNames(wb *xlsxWorkbook, deleteLocalSheetID int) {
 // deleteSheetFromWorkbookRels provides a function to remove worksheet
 // relationships by given relationships ID in the file workbook.xml.rels.
 func (f *File) deleteSheetFromWorkbookRels(rID string) string {
-	rels, _ := f.relsReader(f.getWorkbookRelsPath())
-	rels.Lock()
-	defer rels.Unlock()
-	for k, v := range rels.Relationships {
+	content := f.relsReader(f.getWorkbookRelsPath())
+	content.Lock()
+	defer content.Unlock()
+	for k, v := range content.Relationships {
 		if v.ID == rID {
-			rels.Relationships = append(rels.Relationships[:k], rels.Relationships[k+1:]...)
+			content.Relationships = append(content.Relationships[:k], content.Relationships[k+1:]...)
 			return v.Target
 		}
 	}
@@ -620,14 +569,11 @@ func (f *File) deleteSheetFromWorkbookRels(rID string) string {
 
 // deleteSheetFromContentTypes provides a function to remove worksheet
 // relationships by given target name in the file [Content_Types].xml.
-func (f *File) deleteSheetFromContentTypes(target string) error {
+func (f *File) deleteSheetFromContentTypes(target string) {
 	if !strings.HasPrefix(target, "/") {
 		target = "/xl/" + target
 	}
-	content, err := f.contentTypesReader()
-	if err != nil {
-		return err
-	}
+	content := f.contentTypesReader()
 	content.Lock()
 	defer content.Unlock()
 	for k, v := range content.Overrides {
@@ -635,7 +581,6 @@ func (f *File) deleteSheetFromContentTypes(target string) error {
 			content.Overrides = append(content.Overrides[:k], content.Overrides[k+1:]...)
 		}
 	}
-	return err
 }
 
 // CopySheet provides a function to duplicate a worksheet by gave source and
@@ -685,7 +630,7 @@ func (f *File) copySheet(from, to int) error {
 // SetSheetVisible provides a function to set worksheet visible by given worksheet
 // name. A workbook must contain at least one visible worksheet. If the given
 // worksheet has been activated, this setting will be invalidated. Sheet state
-// values as defined by https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.sheetstatevalues
+// values as defined by https://docs.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.sheetstatevalues
 //
 //	visible
 //	hidden
@@ -695,28 +640,23 @@ func (f *File) copySheet(from, to int) error {
 //
 //	err := f.SetSheetVisible("Sheet1", false)
 func (f *File) SetSheetVisible(sheet string, visible bool) error {
-	if err := checkSheetName(sheet); err != nil {
-		return err
-	}
-	wb, err := f.workbookReader()
-	if err != nil {
-		return err
-	}
+	sheet = trimSheetName(sheet)
+	content := f.workbookReader()
 	if visible {
-		for k, v := range wb.Sheets.Sheet {
+		for k, v := range content.Sheets.Sheet {
 			if strings.EqualFold(v.Name, sheet) {
-				wb.Sheets.Sheet[k].State = ""
+				content.Sheets.Sheet[k].State = ""
 			}
 		}
-		return err
+		return nil
 	}
 	count := 0
-	for _, v := range wb.Sheets.Sheet {
+	for _, v := range content.Sheets.Sheet {
 		if v.State != "hidden" {
 			count++
 		}
 	}
-	for k, v := range wb.Sheets.Sheet {
+	for k, v := range content.Sheets.Sheet {
 		ws, err := f.workSheetReader(v.Name)
 		if err != nil {
 			return err
@@ -726,57 +666,21 @@ func (f *File) SetSheetVisible(sheet string, visible bool) error {
 			tabSelected = ws.SheetViews.SheetView[0].TabSelected
 		}
 		if strings.EqualFold(v.Name, sheet) && count > 1 && !tabSelected {
-			wb.Sheets.Sheet[k].State = "hidden"
+			content.Sheets.Sheet[k].State = "hidden"
 		}
 	}
-	return err
+	return nil
 }
 
-// parsePanesOptions provides a function to parse the panes settings.
-func parsePanesOptions(opts string) (*panesOptions, error) {
-	format := panesOptions{}
-	err := json.Unmarshal([]byte(opts), &format)
+// parseFormatPanesSet provides a function to parse the panes settings.
+func parseFormatPanesSet(formatSet string) (*formatPanes, error) {
+	format := formatPanes{}
+	err := json.Unmarshal([]byte(formatSet), &format)
 	return &format, err
 }
 
-// setPanes set create freeze panes and split panes by given options.
-func (ws *xlsxWorksheet) setPanes(panes string) error {
-	opts, err := parsePanesOptions(panes)
-	if err != nil {
-		return err
-	}
-	p := &xlsxPane{
-		ActivePane:  opts.ActivePane,
-		TopLeftCell: opts.TopLeftCell,
-		XSplit:      float64(opts.XSplit),
-		YSplit:      float64(opts.YSplit),
-	}
-	if opts.Freeze {
-		p.State = "frozen"
-	}
-	if ws.SheetViews == nil {
-		ws.SheetViews = &xlsxSheetViews{SheetView: []xlsxSheetView{{}}}
-	}
-	ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Pane = p
-	if !(opts.Freeze) && !(opts.Split) {
-		if len(ws.SheetViews.SheetView) > 0 {
-			ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Pane = nil
-		}
-	}
-	var s []*xlsxSelection
-	for _, p := range opts.Panes {
-		s = append(s, &xlsxSelection{
-			ActiveCell: p.ActiveCell,
-			Pane:       p.Pane,
-			SQRef:      p.SQRef,
-		})
-	}
-	ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Selection = s
-	return err
-}
-
 // SetPanes provides a function to create and remove freeze panes and split panes
-// by given worksheet name and panes options.
+// by given worksheet name and panes format set.
 //
 // activePane defines the pane that is active. The possible values for this
 // attribute are defined in the following table:
@@ -860,44 +764,68 @@ func (ws *xlsxWorksheet) setPanes(panes string) error {
 //
 //	f.SetPanes("Sheet1", `{"freeze":false,"split":false}`)
 func (f *File) SetPanes(sheet, panes string) error {
+	fs, _ := parseFormatPanesSet(panes)
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
-	return ws.setPanes(panes)
+	p := &xlsxPane{
+		ActivePane:  fs.ActivePane,
+		TopLeftCell: fs.TopLeftCell,
+		XSplit:      float64(fs.XSplit),
+		YSplit:      float64(fs.YSplit),
+	}
+	if fs.Freeze {
+		p.State = "frozen"
+	}
+	if ws.SheetViews == nil {
+		ws.SheetViews = &xlsxSheetViews{SheetView: []xlsxSheetView{{}}}
+	}
+	ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Pane = p
+	if !(fs.Freeze) && !(fs.Split) {
+		if len(ws.SheetViews.SheetView) > 0 {
+			ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Pane = nil
+		}
+	}
+	var s []*xlsxSelection
+	for _, p := range fs.Panes {
+		s = append(s, &xlsxSelection{
+			ActiveCell: p.ActiveCell,
+			Pane:       p.Pane,
+			SQRef:      p.SQRef,
+		})
+	}
+	ws.SheetViews.SheetView[len(ws.SheetViews.SheetView)-1].Selection = s
+	return err
 }
 
 // GetSheetVisible provides a function to get worksheet visible by given worksheet
 // name. For example, get visible state of Sheet1:
 //
 //	f.GetSheetVisible("Sheet1")
-func (f *File) GetSheetVisible(sheet string) (bool, error) {
-	var visible bool
-	if err := checkSheetName(sheet); err != nil {
-		return visible, err
-	}
-	wb, _ := f.workbookReader()
-	for k, v := range wb.Sheets.Sheet {
-		if strings.EqualFold(v.Name, sheet) {
-			if wb.Sheets.Sheet[k].State == "" || wb.Sheets.Sheet[k].State == "visible" {
+func (f *File) GetSheetVisible(sheet string) bool {
+	content, name, visible := f.workbookReader(), trimSheetName(sheet), false
+	for k, v := range content.Sheets.Sheet {
+		if strings.EqualFold(v.Name, name) {
+			if content.Sheets.Sheet[k].State == "" || content.Sheets.Sheet[k].State == "visible" {
 				visible = true
 			}
 		}
 	}
-	return visible, nil
+	return visible
 }
 
-// SearchSheet provides a function to get cell reference by given worksheet name,
+// SearchSheet provides a function to get coordinates by given worksheet name,
 // cell value, and regular expression. The function doesn't support searching
 // on the calculated result, formatted numbers and conditional lookup
-// currently. If it is a merged cell, it will return the cell reference of the
-// upper left cell of the merged range reference.
+// currently. If it is a merged cell, it will return the coordinates of the
+// upper left corner of the merged area.
 //
-// An example of search the cell reference of the value of "100" on Sheet1:
+// An example of search the coordinates of the value of "100" on Sheet1:
 //
 //	result, err := f.SearchSheet("Sheet1", "100")
 //
-// An example of search the cell reference where the numerical value in the range
+// An example of search the coordinates where the numerical value in the range
 // of "0-9" of Sheet1 is described:
 //
 //	result, err := f.SearchSheet("Sheet1", "[0-9]", true)
@@ -906,9 +834,6 @@ func (f *File) SearchSheet(sheet, value string, reg ...bool) ([]string, error) {
 		regSearch bool
 		result    []string
 	)
-	if err := checkSheetName(sheet); err != nil {
-		return result, err
-	}
 	for _, r := range reg {
 		regSearch = r
 	}
@@ -917,25 +842,23 @@ func (f *File) SearchSheet(sheet, value string, reg ...bool) ([]string, error) {
 		return result, ErrSheetNotExist{sheet}
 	}
 	if ws, ok := f.Sheet.Load(name); ok && ws != nil {
-		// Flush data
+		// flush data
 		output, _ := xml.Marshal(ws.(*xlsxWorksheet))
 		f.saveFileList(name, f.replaceNameSpaceBytes(name, output))
 	}
 	return f.searchSheet(name, value, regSearch)
 }
 
-// searchSheet provides a function to get cell reference by given worksheet
-// name, cell value, and regular expression.
+// searchSheet provides a function to get coordinates by given worksheet name,
+// cell value, and regular expression.
 func (f *File) searchSheet(name, value string, regSearch bool) (result []string, err error) {
 	var (
 		cellName, inElement string
 		cellCol, row        int
-		sst                 *xlsxSST
+		d                   *xlsxSST
 	)
 
-	if sst, err = f.sharedStringsReader(); err != nil {
-		return
-	}
+	d = f.sharedStringsReader()
 	decoder := f.xmlNewDecoder(bytes.NewReader(f.readBytes(name)))
 	for {
 		var token xml.Token
@@ -958,7 +881,7 @@ func (f *File) searchSheet(name, value string, regSearch bool) (result []string,
 			if inElement == "c" {
 				colCell := xlsxC{}
 				_ = decoder.DecodeElement(&colCell, &xmlElement)
-				val, _ := colCell.getValueFrom(f, sst, false)
+				val, _ := colCell.getValueFrom(f, d, false)
 				if regSearch {
 					regex := regexp.MustCompile(value)
 					if !regex.MatchString(val) {
@@ -1071,7 +994,7 @@ func attrValToBool(name string, attrs []xml.Attr) (val bool, err error) {
 //	                        |
 //	 &F                     | Current workbook's file name
 //	                        |
-//	 &G                     | Drawing object as background (Not support currently)
+//	 &G                     | Drawing object as background
 //	                        |
 //	 &H                     | Shadow text format
 //	                        |
@@ -1095,7 +1018,7 @@ func attrValToBool(name string, attrs []xml.Attr) (val bool, err error) {
 //	                        |
 //	 &R                     | Right section
 //	                        |
-//	 &S                     | Strike through text format
+//	 &S                     | Strikethrough text format
 //	                        |
 //	 &T                     | Current time
 //	                        |
@@ -1112,7 +1035,7 @@ func attrValToBool(name string, attrs []xml.Attr) (val bool, err error) {
 //
 // For example:
 //
-//	err := f.SetHeaderFooter("Sheet1", &excelize.HeaderFooterOptions{
+//	err := f.SetHeaderFooter("Sheet1", &excelize.FormatHeaderFooter{
 //	    DifferentFirst:   true,
 //	    DifferentOddEven: true,
 //	    OddHeader:        "&R&P",
@@ -1142,7 +1065,7 @@ func attrValToBool(name string, attrs []xml.Attr) (val bool, err error) {
 // that same page
 //
 // - No footer on the first page
-func (f *File) SetHeaderFooter(sheet string, settings *HeaderFooterOptions) error {
+func (f *File) SetHeaderFooter(sheet string, settings *FormatHeaderFooter) error {
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
@@ -1182,52 +1105,52 @@ func (f *File) SetHeaderFooter(sheet string, settings *HeaderFooterOptions) erro
 // specified, will be using the XOR algorithm as default. For example, protect
 // Sheet1 with protection settings:
 //
-//	err := f.ProtectSheet("Sheet1", &excelize.SheetProtectionOptions{
+//	err := f.ProtectSheet("Sheet1", &excelize.FormatSheetProtection{
 //	    AlgorithmName: "SHA-512",
 //	    Password:      "password",
 //	    EditScenarios: false,
 //	})
-func (f *File) ProtectSheet(sheet string, opts *SheetProtectionOptions) error {
+func (f *File) ProtectSheet(sheet string, settings *FormatSheetProtection) error {
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
-	if opts == nil {
-		opts = &SheetProtectionOptions{
+	if settings == nil {
+		settings = &FormatSheetProtection{
 			EditObjects:       true,
 			EditScenarios:     true,
 			SelectLockedCells: true,
 		}
 	}
 	ws.SheetProtection = &xlsxSheetProtection{
-		AutoFilter:          opts.AutoFilter,
-		DeleteColumns:       opts.DeleteColumns,
-		DeleteRows:          opts.DeleteRows,
-		FormatCells:         opts.FormatCells,
-		FormatColumns:       opts.FormatColumns,
-		FormatRows:          opts.FormatRows,
-		InsertColumns:       opts.InsertColumns,
-		InsertHyperlinks:    opts.InsertHyperlinks,
-		InsertRows:          opts.InsertRows,
-		Objects:             opts.EditObjects,
-		PivotTables:         opts.PivotTables,
-		Scenarios:           opts.EditScenarios,
-		SelectLockedCells:   opts.SelectLockedCells,
-		SelectUnlockedCells: opts.SelectUnlockedCells,
+		AutoFilter:          settings.AutoFilter,
+		DeleteColumns:       settings.DeleteColumns,
+		DeleteRows:          settings.DeleteRows,
+		FormatCells:         settings.FormatCells,
+		FormatColumns:       settings.FormatColumns,
+		FormatRows:          settings.FormatRows,
+		InsertColumns:       settings.InsertColumns,
+		InsertHyperlinks:    settings.InsertHyperlinks,
+		InsertRows:          settings.InsertRows,
+		Objects:             settings.EditObjects,
+		PivotTables:         settings.PivotTables,
+		Scenarios:           settings.EditScenarios,
+		SelectLockedCells:   settings.SelectLockedCells,
+		SelectUnlockedCells: settings.SelectUnlockedCells,
 		Sheet:               true,
-		Sort:                opts.Sort,
+		Sort:                settings.Sort,
 	}
-	if opts.Password != "" {
-		if opts.AlgorithmName == "" {
-			ws.SheetProtection.Password = genSheetPasswd(opts.Password)
+	if settings.Password != "" {
+		if settings.AlgorithmName == "" {
+			ws.SheetProtection.Password = genSheetPasswd(settings.Password)
 			return err
 		}
-		hashValue, saltValue, err := genISOPasswdHash(opts.Password, opts.AlgorithmName, "", int(sheetProtectionSpinCount))
+		hashValue, saltValue, err := genISOPasswdHash(settings.Password, settings.AlgorithmName, "", int(sheetProtectionSpinCount))
 		if err != nil {
 			return err
 		}
 		ws.SheetProtection.Password = ""
-		ws.SheetProtection.AlgorithmName = opts.AlgorithmName
+		ws.SheetProtection.AlgorithmName = settings.AlgorithmName
 		ws.SheetProtection.SaltValue = saltValue
 		ws.SheetProtection.HashValue = hashValue
 		ws.SheetProtection.SpinCount = int(sheetProtectionSpinCount)
@@ -1266,28 +1189,193 @@ func (f *File) UnprotectSheet(sheet string, password ...string) error {
 	return err
 }
 
-// checkSheetName check whether there are illegal characters in the sheet name.
-// 1. Confirm that the sheet name is not empty
-// 2. Make sure to enter a name with no more than 31 characters
-// 3. Make sure the first or last character of the name cannot be a single quote
-// 4. Verify that the following characters are not included in the name :\/?*[]
-func checkSheetName(name string) error {
-	if name == "" {
-		return ErrSheetNameBlank
+// trimSheetName provides a function to trim invalid characters by given worksheet
+// name.
+func trimSheetName(name string) string {
+	if strings.ContainsAny(name, ":\\/?*[]") || utf8.RuneCountInString(name) > 31 {
+		r := make([]rune, 0, 31)
+		for _, v := range name {
+			switch v {
+			case 58, 92, 47, 63, 42, 91, 93: // replace :\/?*[]
+				continue
+			default:
+				r = append(r, v)
+			}
+			if len(r) == 31 {
+				break
+			}
+		}
+		name = string(r)
 	}
-	if utf8.RuneCountInString(name) > MaxSheetNameLength {
-		return ErrSheetNameLength
+	return name
+}
+
+// PageLayoutOption is an option of a page layout of a worksheet. See
+// SetPageLayout().
+type PageLayoutOption interface {
+	setPageLayout(layout *xlsxPageSetUp)
+}
+
+// PageLayoutOptionPtr is a writable PageLayoutOption. See GetPageLayout().
+type PageLayoutOptionPtr interface {
+	PageLayoutOption
+	getPageLayout(layout *xlsxPageSetUp)
+}
+
+type (
+	// BlackAndWhite specified print black and white.
+	BlackAndWhite bool
+	// FirstPageNumber specified the first printed page number. If no value is
+	// specified, then 'automatic' is assumed.
+	FirstPageNumber uint
+	// PageLayoutOrientation defines the orientation of page layout for a
+	// worksheet.
+	PageLayoutOrientation string
+	// PageLayoutPaperSize defines the paper size of the worksheet.
+	PageLayoutPaperSize int
+	// FitToHeight specified the number of vertical pages to fit on.
+	FitToHeight int
+	// FitToWidth specified the number of horizontal pages to fit on.
+	FitToWidth int
+	// PageLayoutScale defines the print scaling. This attribute is restricted
+	// to value ranging from 10 (10%) to 400 (400%). This setting is
+	// overridden when fitToWidth and/or fitToHeight are in use.
+	PageLayoutScale uint
+)
+
+const (
+	// OrientationPortrait indicates page layout orientation id portrait.
+	OrientationPortrait = "portrait"
+	// OrientationLandscape indicates page layout orientation id landscape.
+	OrientationLandscape = "landscape"
+)
+
+// setPageLayout provides a method to set the print black and white for the
+// worksheet.
+func (p BlackAndWhite) setPageLayout(ps *xlsxPageSetUp) {
+	ps.BlackAndWhite = bool(p)
+}
+
+// getPageLayout provides a method to get the print black and white for the
+// worksheet.
+func (p *BlackAndWhite) getPageLayout(ps *xlsxPageSetUp) {
+	if ps == nil {
+		*p = false
+		return
 	}
-	if strings.HasPrefix(name, "'") || strings.HasSuffix(name, "'") {
-		return ErrSheetNameSingleQuote
+	*p = BlackAndWhite(ps.BlackAndWhite)
+}
+
+// setPageLayout provides a method to set the first printed page number for
+// the worksheet.
+func (p FirstPageNumber) setPageLayout(ps *xlsxPageSetUp) {
+	if 0 < int(p) {
+		ps.FirstPageNumber = strconv.Itoa(int(p))
+		ps.UseFirstPageNumber = true
 	}
-	if strings.ContainsAny(name, ":\\/?*[]") {
-		return ErrSheetNameInvalid
+}
+
+// getPageLayout provides a method to get the first printed page number for
+// the worksheet.
+func (p *FirstPageNumber) getPageLayout(ps *xlsxPageSetUp) {
+	if ps != nil && ps.UseFirstPageNumber {
+		if number, _ := strconv.Atoi(ps.FirstPageNumber); number != 0 {
+			*p = FirstPageNumber(number)
+			return
+		}
 	}
-	return nil
+	*p = 1
+}
+
+// setPageLayout provides a method to set the orientation for the worksheet.
+func (o PageLayoutOrientation) setPageLayout(ps *xlsxPageSetUp) {
+	ps.Orientation = string(o)
+}
+
+// getPageLayout provides a method to get the orientation for the worksheet.
+func (o *PageLayoutOrientation) getPageLayout(ps *xlsxPageSetUp) {
+	// Excel default: portrait
+	if ps == nil || ps.Orientation == "" {
+		*o = OrientationPortrait
+		return
+	}
+	*o = PageLayoutOrientation(ps.Orientation)
+}
+
+// setPageLayout provides a method to set the paper size for the worksheet.
+func (p PageLayoutPaperSize) setPageLayout(ps *xlsxPageSetUp) {
+	ps.PaperSize = intPtr(int(p))
+}
+
+// getPageLayout provides a method to get the paper size for the worksheet.
+func (p *PageLayoutPaperSize) getPageLayout(ps *xlsxPageSetUp) {
+	// Excel default: 1
+	if ps == nil || ps.PaperSize == nil {
+		*p = 1
+		return
+	}
+	*p = PageLayoutPaperSize(*ps.PaperSize)
+}
+
+// setPageLayout provides a method to set the fit to height for the worksheet.
+func (p FitToHeight) setPageLayout(ps *xlsxPageSetUp) {
+	if int(p) > 0 {
+		ps.FitToHeight = intPtr(int(p))
+	}
+}
+
+// getPageLayout provides a method to get the fit to height for the worksheet.
+func (p *FitToHeight) getPageLayout(ps *xlsxPageSetUp) {
+	if ps == nil || ps.FitToHeight == nil {
+		*p = 1
+		return
+	}
+	*p = FitToHeight(*ps.FitToHeight)
+}
+
+// setPageLayout provides a method to set the fit to width for the worksheet.
+func (p FitToWidth) setPageLayout(ps *xlsxPageSetUp) {
+	if int(p) > 0 {
+		ps.FitToWidth = intPtr(int(p))
+	}
+}
+
+// getPageLayout provides a method to get the fit to width for the worksheet.
+func (p *FitToWidth) getPageLayout(ps *xlsxPageSetUp) {
+	if ps == nil || ps.FitToWidth == nil {
+		*p = 1
+		return
+	}
+	*p = FitToWidth(*ps.FitToWidth)
+}
+
+// setPageLayout provides a method to set the scale for the worksheet.
+func (p PageLayoutScale) setPageLayout(ps *xlsxPageSetUp) {
+	if 10 <= int(p) && int(p) <= 400 {
+		ps.Scale = int(p)
+	}
+}
+
+// getPageLayout provides a method to get the scale for the worksheet.
+func (p *PageLayoutScale) getPageLayout(ps *xlsxPageSetUp) {
+	if ps == nil || ps.Scale < 10 || ps.Scale > 400 {
+		*p = 100
+		return
+	}
+	*p = PageLayoutScale(ps.Scale)
 }
 
 // SetPageLayout provides a function to sets worksheet page layout.
+//
+// Available options:
+//
+//	BlackAndWhite(bool)
+//	FirstPageNumber(uint)
+//	PageLayoutOrientation(string)
+//	PageLayoutPaperSize(int)
+//	FitToHeight(int)
+//	FitToWidth(int)
+//	PageLayoutScale(uint)
 //
 // The following shows the paper size sorted by excelize index number:
 //
@@ -1409,93 +1497,42 @@ func checkSheetName(name string) error {
 //	   116 | PRC Envelope #8 Rotated (309 mm x 120 mm)
 //	   117 | PRC Envelope #9 Rotated (324 mm x 229 mm)
 //	   118 | PRC Envelope #10 Rotated (458 mm x 324 mm)
-func (f *File) SetPageLayout(sheet string, opts *PageLayoutOptions) error {
-	ws, err := f.workSheetReader(sheet)
+func (f *File) SetPageLayout(sheet string, opts ...PageLayoutOption) error {
+	s, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
-	if opts == nil {
-		return err
+	ps := s.PageSetUp
+	if ps == nil {
+		ps = new(xlsxPageSetUp)
+		s.PageSetUp = ps
 	}
-	ws.setPageSetUp(opts)
+
+	for _, opt := range opts {
+		opt.setPageLayout(ps)
+	}
 	return err
 }
 
-// newPageSetUp initialize page setup settings for the worksheet if which not
-// exist.
-func (ws *xlsxWorksheet) newPageSetUp() {
-	if ws.PageSetUp == nil {
-		ws.PageSetUp = new(xlsxPageSetUp)
-	}
-}
-
-// setPageSetUp set page setup settings for the worksheet by given options.
-func (ws *xlsxWorksheet) setPageSetUp(opts *PageLayoutOptions) {
-	if opts.Size != nil {
-		ws.newPageSetUp()
-		ws.PageSetUp.PaperSize = opts.Size
-	}
-	if opts.Orientation != nil && (*opts.Orientation == "portrait" || *opts.Orientation == "landscape") {
-		ws.newPageSetUp()
-		ws.PageSetUp.Orientation = *opts.Orientation
-	}
-	if opts.FirstPageNumber != nil && *opts.FirstPageNumber > 0 {
-		ws.newPageSetUp()
-		ws.PageSetUp.FirstPageNumber = strconv.Itoa(int(*opts.FirstPageNumber))
-		ws.PageSetUp.UseFirstPageNumber = true
-	}
-	if opts.AdjustTo != nil && 10 <= *opts.AdjustTo && *opts.AdjustTo <= 400 {
-		ws.newPageSetUp()
-		ws.PageSetUp.Scale = int(*opts.AdjustTo)
-	}
-	if opts.FitToHeight != nil {
-		ws.newPageSetUp()
-		ws.PageSetUp.FitToHeight = opts.FitToHeight
-	}
-	if opts.FitToWidth != nil {
-		ws.newPageSetUp()
-		ws.PageSetUp.FitToWidth = opts.FitToWidth
-	}
-	if opts.BlackAndWhite != nil {
-		ws.newPageSetUp()
-		ws.PageSetUp.BlackAndWhite = *opts.BlackAndWhite
-	}
-}
-
 // GetPageLayout provides a function to gets worksheet page layout.
-func (f *File) GetPageLayout(sheet string) (PageLayoutOptions, error) {
-	opts := PageLayoutOptions{
-		Size:            intPtr(0),
-		Orientation:     stringPtr("portrait"),
-		FirstPageNumber: uintPtr(1),
-		AdjustTo:        uintPtr(100),
-	}
-	ws, err := f.workSheetReader(sheet)
+//
+// Available options:
+//
+//	PageLayoutOrientation(string)
+//	PageLayoutPaperSize(int)
+//	FitToHeight(int)
+//	FitToWidth(int)
+func (f *File) GetPageLayout(sheet string, opts ...PageLayoutOptionPtr) error {
+	s, err := f.workSheetReader(sheet)
 	if err != nil {
-		return opts, err
+		return err
 	}
-	if ws.PageSetUp != nil {
-		if ws.PageSetUp.PaperSize != nil {
-			opts.Size = ws.PageSetUp.PaperSize
-		}
-		if ws.PageSetUp.Orientation != "" {
-			opts.Orientation = stringPtr(ws.PageSetUp.Orientation)
-		}
-		if num, _ := strconv.Atoi(ws.PageSetUp.FirstPageNumber); num != 0 {
-			opts.FirstPageNumber = uintPtr(uint(num))
-		}
-		if ws.PageSetUp.Scale >= 10 && ws.PageSetUp.Scale <= 400 {
-			opts.AdjustTo = uintPtr(uint(ws.PageSetUp.Scale))
-		}
-		if ws.PageSetUp.FitToHeight != nil {
-			opts.FitToHeight = ws.PageSetUp.FitToHeight
-		}
-		if ws.PageSetUp.FitToWidth != nil {
-			opts.FitToWidth = ws.PageSetUp.FitToWidth
-		}
-		opts.BlackAndWhite = boolPtr(ws.PageSetUp.BlackAndWhite)
+	ps := s.PageSetUp
+
+	for _, opt := range opts {
+		opt.getPageLayout(ps)
 	}
-	return opts, err
+	return err
 }
 
 // SetDefinedName provides a function to set the defined names of the workbook
@@ -1509,17 +1546,14 @@ func (f *File) GetPageLayout(sheet string) (PageLayoutOptions, error) {
 //	    Scope:    "Sheet2",
 //	})
 func (f *File) SetDefinedName(definedName *DefinedName) error {
-	wb, err := f.workbookReader()
-	if err != nil {
-		return err
-	}
+	wb := f.workbookReader()
 	d := xlsxDefinedName{
 		Name:    definedName.Name,
 		Comment: definedName.Comment,
 		Data:    definedName.RefersTo,
 	}
 	if definedName.Scope != "" {
-		if sheetIndex, _ := f.GetSheetIndex(definedName.Scope); sheetIndex >= 0 {
+		if sheetIndex := f.GetSheetIndex(definedName.Scope); sheetIndex >= 0 {
 			d.LocalSheetID = &sheetIndex
 		}
 	}
@@ -1551,10 +1585,7 @@ func (f *File) SetDefinedName(definedName *DefinedName) error {
 //	    Scope:    "Sheet2",
 //	})
 func (f *File) DeleteDefinedName(definedName *DefinedName) error {
-	wb, err := f.workbookReader()
-	if err != nil {
-		return err
-	}
+	wb := f.workbookReader()
 	if wb.DefinedNames != nil {
 		for idx, dn := range wb.DefinedNames.DefinedName {
 			scope := "Workbook"
@@ -1567,7 +1598,7 @@ func (f *File) DeleteDefinedName(definedName *DefinedName) error {
 			}
 			if scope == deleteScope && dn.Name == definedName.Name {
 				wb.DefinedNames.DefinedName = append(wb.DefinedNames.DefinedName[:idx], wb.DefinedNames.DefinedName[idx+1:]...)
-				return err
+				return nil
 			}
 		}
 	}
@@ -1578,7 +1609,7 @@ func (f *File) DeleteDefinedName(definedName *DefinedName) error {
 // or worksheet.
 func (f *File) GetDefinedName() []DefinedName {
 	var definedNames []DefinedName
-	wb, _ := f.workbookReader()
+	wb := f.workbookReader()
 	if wb.DefinedNames != nil {
 		for _, dn := range wb.DefinedNames.DefinedName {
 			definedName := DefinedName{
@@ -1599,7 +1630,7 @@ func (f *File) GetDefinedName() []DefinedName {
 // GroupSheets provides a function to group worksheets by given worksheets
 // name. Group worksheets must contain an active worksheet.
 func (f *File) GroupSheets(sheets []string) error {
-	// Check an active worksheet in group worksheets
+	// check an active worksheet in group worksheets
 	var inActiveSheet bool
 	activeSheet := f.GetActiveSheetIndex()
 	sheetMap := f.GetSheetList()
@@ -1653,38 +1684,29 @@ func (f *File) UngroupSheets() error {
 }
 
 // InsertPageBreak create a page break to determine where the printed page
-// ends and where begins the next one by given worksheet name and cell
-// reference, so the content before the page break will be printed on one page
-// and after the page break on another.
-func (f *File) InsertPageBreak(sheet, cell string) error {
-	ws, err := f.workSheetReader(sheet)
-	if err != nil {
-		return err
+// ends and where begins the next one by given worksheet name and axis, so the
+// content before the page break will be printed on one page and after the
+// page break on another.
+func (f *File) InsertPageBreak(sheet, cell string) (err error) {
+	var ws *xlsxWorksheet
+	var row, col int
+	rowBrk, colBrk := -1, -1
+	if ws, err = f.workSheetReader(sheet); err != nil {
+		return
 	}
-	return ws.insertPageBreak(cell)
-}
-
-// insertPageBreak create a page break in the worksheet by specific cell
-// reference.
-func (ws *xlsxWorksheet) insertPageBreak(cell string) error {
-	var (
-		row, col       int
-		err            error
-		rowBrk, colBrk = -1, -1
-	)
 	if col, row, err = CellNameToCoordinates(cell); err != nil {
-		return err
+		return
 	}
 	col--
 	row--
 	if col == row && col == 0 {
-		return err
+		return
 	}
 	if ws.RowBreaks == nil {
-		ws.RowBreaks = &xlsxRowBreaks{}
+		ws.RowBreaks = &xlsxBreaks{}
 	}
 	if ws.ColBreaks == nil {
-		ws.ColBreaks = &xlsxColBreaks{}
+		ws.ColBreaks = &xlsxBreaks{}
 	}
 
 	for idx, brk := range ws.RowBreaks.Brk {
@@ -1701,7 +1723,7 @@ func (ws *xlsxWorksheet) insertPageBreak(cell string) error {
 	if row != 0 && rowBrk == -1 {
 		ws.RowBreaks.Brk = append(ws.RowBreaks.Brk, &xlsxBrk{
 			ID:  row,
-			Max: MaxColumns - 1,
+			Max: 16383,
 			Man: true,
 		})
 		ws.RowBreaks.ManualBreakCount++
@@ -1709,34 +1731,30 @@ func (ws *xlsxWorksheet) insertPageBreak(cell string) error {
 	if col != 0 && colBrk == -1 {
 		ws.ColBreaks.Brk = append(ws.ColBreaks.Brk, &xlsxBrk{
 			ID:  col,
-			Max: TotalRows - 1,
+			Max: 1048575,
 			Man: true,
 		})
 		ws.ColBreaks.ManualBreakCount++
 	}
 	ws.RowBreaks.Count = len(ws.RowBreaks.Brk)
 	ws.ColBreaks.Count = len(ws.ColBreaks.Brk)
-	return err
+	return
 }
 
-// RemovePageBreak remove a page break by given worksheet name and cell
-// reference.
-func (f *File) RemovePageBreak(sheet, cell string) error {
-	var (
-		ws       *xlsxWorksheet
-		row, col int
-		err      error
-	)
+// RemovePageBreak remove a page break by given worksheet name and axis.
+func (f *File) RemovePageBreak(sheet, cell string) (err error) {
+	var ws *xlsxWorksheet
+	var row, col int
 	if ws, err = f.workSheetReader(sheet); err != nil {
-		return err
+		return
 	}
 	if col, row, err = CellNameToCoordinates(cell); err != nil {
-		return err
+		return
 	}
 	col--
 	row--
 	if col == row && col == 0 {
-		return err
+		return
 	}
 	removeBrk := func(ID int, brks []*xlsxBrk) []*xlsxBrk {
 		for i, brk := range brks {
@@ -1747,7 +1765,7 @@ func (f *File) RemovePageBreak(sheet, cell string) error {
 		return brks
 	}
 	if ws.RowBreaks == nil || ws.ColBreaks == nil {
-		return err
+		return
 	}
 	rowBrks := len(ws.RowBreaks.Brk)
 	colBrks := len(ws.ColBreaks.Brk)
@@ -1758,40 +1776,41 @@ func (f *File) RemovePageBreak(sheet, cell string) error {
 		ws.ColBreaks.Count = len(ws.ColBreaks.Brk)
 		ws.RowBreaks.ManualBreakCount--
 		ws.ColBreaks.ManualBreakCount--
-		return err
+		return
 	}
 	if rowBrks > 0 && rowBrks > colBrks {
 		ws.RowBreaks.Brk = removeBrk(row, ws.RowBreaks.Brk)
 		ws.RowBreaks.Count = len(ws.RowBreaks.Brk)
 		ws.RowBreaks.ManualBreakCount--
-		return err
+		return
 	}
 	if colBrks > 0 && colBrks > rowBrks {
 		ws.ColBreaks.Brk = removeBrk(col, ws.ColBreaks.Brk)
 		ws.ColBreaks.Count = len(ws.ColBreaks.Brk)
 		ws.ColBreaks.ManualBreakCount--
 	}
-	return err
+	return
 }
 
 // relsReader provides a function to get the pointer to the structure
 // after deserialization of xl/worksheets/_rels/sheet%d.xml.rels.
-func (f *File) relsReader(path string) (*xlsxRelationships, error) {
+func (f *File) relsReader(path string) *xlsxRelationships {
+	var err error
 	rels, _ := f.Relationships.Load(path)
 	if rels == nil {
 		if _, ok := f.Pkg.Load(path); ok {
 			c := xlsxRelationships{}
-			if err := f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(path)))).
+			if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(path)))).
 				Decode(&c); err != nil && err != io.EOF {
-				return nil, err
+				log.Printf("xml decode error: %s", err)
 			}
 			f.Relationships.Store(path, &c)
 		}
 	}
 	if rels, _ = f.Relationships.Load(path); rels != nil {
-		return rels.(*xlsxRelationships), nil
+		return rels.(*xlsxRelationships)
 	}
-	return nil, nil
+	return nil
 }
 
 // fillSheetData ensures there are enough rows, and columns in the chosen
